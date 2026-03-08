@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant Agent as AI Agent
+    participant Gate as Aegis Gate<br/>(localhost:3100)
+    participant Vault as Vault<br/>(SQLite + AES-256-GCM)
+    participant Ledger as Ledger<br/>(SQLite audit_log)
+    participant API as External API<br/>(HTTPS)
+
+    Note over Agent,API: Agent NEVER has the real credential
+
+    Agent->>Gate: POST /slack/api/chat.postMessage<br/>Headers: Content-Type, X-Target-Host
+
+    Gate->>Gate: Parse URL<br/>service = "slack"<br/>path = "/api/chat.postMessage"
+
+    Gate->>Vault: getByService("slack")
+    Vault->>Vault: SELECT encrypted, iv, auth_tag<br/>FROM credentials<br/>WHERE service = 'slack'
+    Vault->>Vault: AES-256-GCM decrypt<br/>using cached derivedKey
+    Vault-->>Gate: { secret: "xoxb-real-key",<br/>domains: ["api.slack.com"],<br/>authType: "bearer" }
+
+    Gate->>Gate: Domain Guard Check<br/>Is "api.slack.com" in<br/>["api.slack.com"]?<br/>✓ ALLOWED
+
+    Gate->>Gate: Strip agent auth headers<br/>(Authorization, X-API-Key,<br/>Host, X-Target-Host)
+
+    Gate->>Gate: Inject credential<br/>Authorization: Bearer xoxb-real-key<br/>Host: api.slack.com
+
+    Gate->>API: HTTPS POST api.slack.com/api/chat.postMessage<br/>Authorization: Bearer xoxb-real-key<br/>(TLS encrypted in transit)
+    API-->>Gate: 200 OK { "ok": true }
+
+    Gate->>Gate: Strip Set-Cookie<br/>from response
+
+    Gate->>Ledger: logAllowed({ service: "slack",<br/>domain: "api.slack.com",<br/>method: "POST", status: 200 })
+
+    Gate-->>Agent: 200 OK { "ok": true }<br/>(NO credential in response)

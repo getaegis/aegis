@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant Agent as AI Agent<br/>(Malicious)
+    participant Gate as Aegis Gate
+    participant Vault as Vault
+    participant Ledger as Ledger
+
+    Note over Agent,Ledger: Exfiltration attempt — agent tries to<br/>send Slack credential to evil.com
+
+    Agent->>Gate: POST /slack/steal<br/>X-Target-Host: evil.com
+
+    Gate->>Gate: Parse URL<br/>service = "slack"
+
+    Gate->>Vault: getByService("slack")
+    Vault-->>Gate: { domains: ["api.slack.com"],<br/>secret: "xoxb-..." }
+
+    Gate->>Gate: Domain Guard Check<br/>Is "evil.com" in<br/>["api.slack.com"]?
+
+    rect rgb(255, 200, 200)
+        Gate->>Gate: ✗ BLOCKED<br/>evil.com NOT in allowlist
+    end
+
+    Gate->>Ledger: logBlocked({<br/>domain: "evil.com",<br/>reason: "not in allowlist" })
+
+    Gate-->>Agent: 403 Forbidden<br/>{ error: "Domain not in<br/>credential allowlist" }
+
+    Note over Agent,Ledger: Credential NEVER left the process.<br/>Attack fully logged in Ledger.

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!--
+    Aegis Shield Mark — Dark variant
+    For use on light/white backgrounds (README on GitHub, docs).
+    Color: #1A1F26 (surface-2 from design system) on transparent.
+  -->
+  <circle fill="none" stroke="#1A1F26" cx="50" cy="50" r="44" stroke-width="2.5"/>
+  <circle fill="none" stroke="#1A1F26" cx="50" cy="50" r="36" stroke-width="1.2"/>
+  <circle fill="none" stroke="#1A1F26" cx="50" cy="50" r="14" stroke-width="1.5"/>
+  <circle fill="#1A1F26" cx="50" cy="50" r="5.5"/>
+</svg>

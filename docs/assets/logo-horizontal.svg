@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 80" width="260" height="80">
+  <!--
+    Aegis Horizontal Lockup
+    Shield mark + "Aegis" wordmark side by side.
+    Use: header, README badge, documentation header.
+    Color: Aegis Gold (#C8973E) on transparent.
+    Font: system sans-serif stack (renders as SF Pro on macOS, Segoe UI on Windows).
+  -->
+
+  <!-- Shield mark (concentric rings, scaled to fit 80px height) -->
+  <g>
+    <circle fill="none" stroke="#C8973E" cx="40" cy="40" r="35" stroke-width="2"/>
+    <circle fill="none" stroke="#C8973E" cx="40" cy="40" r="28.5" stroke-width="1"/>
+    <circle fill="none" stroke="#C8973E" cx="40" cy="40" r="11" stroke-width="1.2"/>
+    <circle fill="#C8973E" cx="40" cy="40" r="4.4"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text fill="#C8973E"
+        font-family="Inter, 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif"
+        font-weight="500"
+        font-size="34"
+        letter-spacing="0.04em"
+        x="95"
+        y="52">Aegis</text>
+</svg>

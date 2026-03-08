@@ -1,0 +1,99 @@
+@import 'tailwindcss';
+
+/*
+ * Aegis Design Tokens — CSS Custom Properties
+ * Single source of truth for the visual system.
+ * Referenced by Tailwind via @theme inline below.
+ */
+
+@theme inline {
+  /* Surfaces */
+  --color-base: #0B0E11;
+  --color-surface-0: #12161B;
+  --color-surface-1: #1A1F26;
+  --color-surface-2: #242A33;
+  --color-surface-3: #2E3640;
+  --color-border: #333B45;
+  --color-border-sub: #272E37;
+
+  /* Text */
+  --color-primary: #E8ECEF;
+  --color-secondary: #9BA3AE;
+  --color-tertiary: #6B7685;
+  --color-disabled: #4A5260;
+
+  /* Accents */
+  --color-gold: #C8973E;
+  --color-gold-hover: #D4A84E;
+  --color-gold-muted: #C8973E26;
+
+  /* Status */
+  --color-allowed: #34A853;
+  --color-allowed-bg: #34A85315;
+  --color-blocked: #D93025;
+  --color-blocked-bg: #D9302515;
+  --color-warning: #E8A317;
+  --color-warning-bg: #E8A31715;
+  --color-info: #4A90D9;
+  --color-info-bg: #4A90D915;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', monospace;
+
+  /* Spacing */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* Transitions */
+  --transition-fast: color 100ms ease, background-color 100ms ease, border-color 100ms ease;
+  --transition-base: all 150ms ease-out;
+
+  /* Layout */
+  --sidebar-width: 220px;
+  --sidebar-collapsed: 56px;
+  --content-max-width: 1400px;
+  --header-height: 52px;
+}
+
+/* Base resets */
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface-0);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-surface-3);
+}

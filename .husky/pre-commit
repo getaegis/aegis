@@ -1,0 +1,3 @@
+set -e
+yarn lint-staged
+yarn typecheck

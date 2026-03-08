@@ -1,0 +1,36 @@
+node_modules/
+dist/
+*.js.map
+
+# Lock files — yarn only
+package-lock.json
+
+# Yarn 4 (node-modules linker, no zero-installs)
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+.pnp.*
+dashboard/.yarn/*
+
+# Aegis data — NEVER commit credentials
+.aegis/
+
+# Aegis config — may contain master key
+aegis.config.yaml
+
+# Local policy files (manual testing)
+policies/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 170" width="200" height="170">
+  <!--
+    Aegis Stacked Lockup
+    Shield mark centred above "Aegis" wordmark.
+    Use: splash screen, square format, social media avatar.
+    Color: Aegis Gold (#C8973E) on transparent.
+  -->
+
+  <!-- Shield mark (concentric rings, matching logo-mark proportions) -->
+  <g>
+    <circle fill="none" stroke="#C8973E" cx="100" cy="60" r="44" stroke-width="2.5"/>
+    <circle fill="none" stroke="#C8973E" cx="100" cy="60" r="36" stroke-width="1.2"/>
+    <circle fill="none" stroke="#C8973E" cx="100" cy="60" r="14" stroke-width="1.5"/>
+    <circle fill="#C8973E" cx="100" cy="60" r="5.5"/>
+  </g>
+
+  <!-- Wordmark (centred below the shield) -->
+  <text fill="#C8973E"
+        font-family="Inter, 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif"
+        font-weight="500"
+        font-size="28"
+        letter-spacing="0.04em"
+        text-anchor="middle"
+        x="100"
+        y="150">Aegis</text>
+</svg>

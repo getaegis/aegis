@@ -1,0 +1,42 @@
+graph TD
+    subgraph INIT["aegis init"]
+        MK["crypto.randomBytes(32)<br/>→ Master Key<br/>(256 bits, hex encoded)"]
+        SALT["crypto.randomBytes(32)<br/>→ Salt<br/>(256 bits, hex encoded)"]
+    end
+
+    subgraph KDF["Key Derivation (once per process)"]
+        MK --> PBKDF2["PBKDF2-SHA512<br/>100,000 iterations"]
+        SALT --> PBKDF2
+        PBKDF2 --> DK["Derived Key<br/>(32 bytes / 256 bits)<br/>Cached in Vault.derivedKey"]
+    end
+
+    subgraph ENC["Encryption (per credential stored)"]
+        RIV["crypto.randomBytes(16)<br/>→ Random IV<br/>(unique per encrypt)"]
+        PT["Plaintext Secret<br/>(e.g., 'xoxb-real-key')"]
+        DK --> AESGCM["AES-256-GCM<br/>Encrypt"]
+        RIV --> AESGCM
+        PT --> AESGCM
+        AESGCM --> CT["Ciphertext<br/>(BLOB)"]
+        AESGCM --> AT["Auth Tag<br/>(16 bytes)"]
+    end
+
+    subgraph DB["SQLite Storage"]
+        CT --> ROW["credentials row:<br/>encrypted = BLOB<br/>iv = BLOB<br/>auth_tag = BLOB"]
+        AT --> ROW
+        RIV --> ROW
+    end
+
+    subgraph DEC["Decryption (per request)"]
+        ROW --> |"Read BLOB columns"| AESD["AES-256-GCM<br/>Decrypt"]
+        DK --> AESD
+        AESD --> |"Verify auth tag"| PTOUT["Plaintext Secret<br/>(in memory only,<br/>used for one request)"]
+    end
+
+    style MK fill:#ff9999,stroke:#cc0000,color:#000
+    style SALT fill:#ff9999,stroke:#cc0000,color:#000
+    style DK fill:#ffcc99,stroke:#cc6600,color:#000
+    style PT fill:#ff9999,stroke:#cc0000,color:#000
+    style PTOUT fill:#ff9999,stroke:#cc0000,color:#000
+    style CT fill:#99ff99,stroke:#009900,color:#000
+    style AT fill:#99ff99,stroke:#009900,color:#000
+    style ROW fill:#99ccff,stroke:#0066cc,color:#000

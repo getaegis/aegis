@@ -1,0 +1,33 @@
+graph LR
+    subgraph TRUSTED["TRUSTED ZONE (your machine)"]
+        direction TB
+        ENV["Environment Variables<br/>AEGIS_MASTER_KEY<br/>AEGIS_SALT"]
+        VAULT["Vault<br/>(encrypted secrets<br/>in SQLite)"]
+        GATE["Aegis Gate<br/>(localhost:3100)"]
+        LEDGER["Ledger<br/>(audit log)"]
+
+        ENV -->|"loaded at startup"| GATE
+        VAULT -->|"decrypt on demand"| GATE
+        GATE -->|"log every request"| LEDGER
+    end
+
+    subgraph UNTRUSTED["UNTRUSTED ZONE"]
+        AGENT["AI Agent<br/>(any language/framework)"]
+    end
+
+    subgraph EXTERNAL["EXTERNAL (internet)"]
+        API["Target API<br/>(api.slack.com etc.)"]
+    end
+
+    AGENT -->|"① HTTP request<br/>(no credentials)"| GATE
+    GATE -->|"③ HTTPS request<br/>(with credentials,<br/>TLS encrypted)"| API
+    API -->|"④ HTTPS response"| GATE
+    GATE -->|"⑤ HTTP response<br/>(no credentials)"| AGENT
+    GATE -->|"② Domain Guard<br/>check"| GATE
+
+    style AGENT fill:#ffcccc,stroke:#cc0000,color:#000
+    style ENV fill:#ff9999,stroke:#cc0000,color:#000
+    style VAULT fill:#99ccff,stroke:#0066cc,color:#000
+    style GATE fill:#99ff99,stroke:#009900,color:#000
+    style LEDGER fill:#ffff99,stroke:#cccc00,color:#000
+    style API fill:#cccccc,stroke:#666666,color:#000
