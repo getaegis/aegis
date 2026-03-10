@@ -1,11 +1,25 @@
 {
   "name": "@getaegis/cli",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Credential isolation for AI agents. Store, guard, and record — your agent never sees your API keys.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "aegis": "dist/cli.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getaegis/aegis.git"
+  },
+  "homepage": "https://github.com/getaegis/aegis#readme",
+  "bugs": {
+    "url": "https://github.com/getaegis/aegis/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc && cd dashboard && yarn build && rm -rf ../dist/dashboard/public && cp -r dist ../dist/dashboard/public",
@@ -18,6 +32,7 @@
     "format": "biome format --write src/ tests/",
     "typecheck": "tsc --noEmit",
     "verify": "biome check src/ tests/ && tsc --noEmit",
+    "prepublishOnly": "yarn build && yarn test",
     "prepare": "husky"
   },
   "lint-staged": {
