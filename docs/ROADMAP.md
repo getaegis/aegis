@@ -87,8 +87,8 @@ Each phase builds on the last. Checked items are shipped.
 - [x] Public-facing README, LICENSE (Apache 2.0), CONTRIBUTING, SECURITY
 - [x] npm package (`@getaegis/cli`)
 - [x] Docker image (multi-stage, Debian bookworm-slim)
-- [ ] CI/CD pipeline (GitHub Actions)
-- [ ] Homebrew formula
+- [x] CI/CD pipeline (GitHub Actions)
+- [x] Homebrew formula
 
 ---
 

@@ -1,5 +1,10 @@
 # Aegis
 
+[![CI](https://github.com/getaegis/aegis/actions/workflows/ci.yml/badge.svg)](https://github.com/getaegis/aegis/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@getaegis/cli)](https://www.npmjs.com/package/@getaegis/cli)
+[![Docker](https://img.shields.io/badge/ghcr.io-getaegis%2Faegis-blue?logo=docker)](https://ghcr.io/getaegis/aegis)
+[![License](https://img.shields.io/github/license/getaegis/aegis)](LICENSE)
+
 **Credential isolation for AI agents.**
 
 Aegis sits between your AI agent and the APIs it calls. The agent never sees, stores, or transmits real credentials — Aegis injects them at the network boundary.
