@@ -396,7 +396,7 @@ describe('gate integration tests', () => {
       expect(upstream.last?.headers.authorization).toBe(expected);
     });
 
-    it('handles query auth type without adding auth headers', async () => {
+    it('injects query auth type as URL query parameter', async () => {
       vault.add({
         name: 'query-cred',
         service: 'query-svc',
@@ -408,9 +408,42 @@ describe('gate integration tests', () => {
       await gateRequest(gatePort, '/query-svc/v1/data');
 
       expect(upstream.last).toBeDefined();
-      // Query auth type doesn't inject headers in v0.1
+      // Query auth appends ?key=secret to the URL
+      expect(upstream.last?.url).toBe('/v1/data?key=api-key-query-999');
+      // No auth headers should be injected
       expect(upstream.last?.headers.authorization).toBeUndefined();
       expect(upstream.last?.headers['x-api-key']).toBeUndefined();
+    });
+
+    it('injects query auth with custom param name via headerName', async () => {
+      vault.add({
+        name: 'query-cred-custom',
+        service: 'query-custom-svc',
+        secret: 'my-api-key-123',
+        authType: 'query',
+        headerName: 'api_key',
+        domains: ['api.query.com'],
+      });
+
+      await gateRequest(gatePort, '/query-custom-svc/v1/search');
+
+      expect(upstream.last).toBeDefined();
+      expect(upstream.last?.url).toBe('/v1/search?api_key=my-api-key-123');
+    });
+
+    it('appends query auth to existing query parameters', async () => {
+      vault.add({
+        name: 'query-cred-append',
+        service: 'query-append-svc',
+        secret: 'key-456',
+        authType: 'query',
+        domains: ['api.query.com'],
+      });
+
+      await gateRequest(gatePort, '/query-append-svc/v1/data?foo=bar');
+
+      expect(upstream.last).toBeDefined();
+      expect(upstream.last?.url).toBe('/v1/data?foo=bar&key=key-456');
     });
   });
 

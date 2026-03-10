@@ -766,14 +766,14 @@ export class AegisMcpServer {
         outboundHeaders['content-type'] = 'application/json';
       }
 
-      // Inject the real credential
-      this.injectCredential(outboundHeaders, credential);
+      // Inject the real credential (query auth may modify the path)
+      const injectedPath = this.injectCredential(outboundHeaders, credential, params.path);
 
       const proxyReq = https.request(
         {
           hostname: params.targetDomain,
           port: 443,
-          path: params.path,
+          path: injectedPath ?? params.path,
           method: params.method,
           headers: outboundHeaders,
         },
@@ -825,11 +825,13 @@ export class AegisMcpServer {
 
   /**
    * Inject the credential into outbound request headers based on auth type.
+   * For `query` auth, the secret is appended as a URL query parameter instead.
    */
   private injectCredential(
     headers: http.OutgoingHttpHeaders,
     credential: CredentialWithSecret,
-  ): void {
+    path?: string,
+  ): string | undefined {
     switch (credential.authType) {
       case 'bearer':
         headers.authorization = `Bearer ${credential.secret}`;
@@ -840,10 +842,17 @@ export class AegisMcpServer {
       case 'basic':
         headers.authorization = `Basic ${Buffer.from(credential.secret).toString('base64')}`;
         break;
-      case 'query':
-        // Query params would need URL modification — v0.4 limitation
+      case 'query': {
+        if (path !== undefined) {
+          const paramName = encodeURIComponent(credential.headerName ?? 'key');
+          const paramValue = encodeURIComponent(credential.secret);
+          const separator = path.includes('?') ? '&' : '?';
+          return `${path}${separator}${paramName}=${paramValue}`;
+        }
         break;
+      }
     }
+    return path;
   }
 
   // ─── Transport & Lifecycle ─────────────────────────────────────

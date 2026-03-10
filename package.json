@@ -48,7 +48,7 @@
     "ai-security",
     "agent-governance"
   ],
-  "author": "Samuel Warren",
+  "author": "Samuel Warren <getaegis.npm@gmail.com>",
   "license": "Apache-2.0",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

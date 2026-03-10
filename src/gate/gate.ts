@@ -65,9 +65,9 @@ export interface GateOptions {
   webhooks?: WebhookManager;
   /** Callback fired after every audit entry is logged — used by dashboard for live feed */
   onAuditEntry?: (entry: AuditBroadcast) => void;
-  /** @internal For testing only — redirect outbound requests to a local server */
+  /** Testing: redirect outbound requests to a local server */
   _testUpstream?: { protocol: 'http' | 'https'; hostname: string; port: number };
-  /** @internal For testing only — inject policies directly without loading from disk */
+  /** Testing: inject policies directly without loading from disk */
   _testPolicies?: Map<string, Policy>;
 }
 
@@ -1021,8 +1021,8 @@ export class Gate {
         outboundHeaders[key] = value;
       }
 
-      // Inject the real credential
-      this.injectCredential(outboundHeaders, credential);
+      // Inject the real credential (query auth may modify the path)
+      const injectedPath = this.injectCredential(outboundHeaders, credential, `${remainingPath}${query}`);
       outboundHeaders.host = targetDomain;
 
       reqLog.debug(
@@ -1099,7 +1099,7 @@ export class Gate {
           {
             hostname: upstream?.hostname ?? targetDomain,
             port: upstream?.port ?? 443,
-            path: `${remainingPath}${query}`,
+            path: injectedPath ?? `${remainingPath}${query}`,
             method: req.method,
             headers: outboundHeaders,
           },
@@ -1179,11 +1179,13 @@ export class Gate {
 
   /**
    * Inject the credential into outbound request headers based on auth type.
+   * For `query` auth, the secret is appended as a URL query parameter instead.
    */
   private injectCredential(
     headers: http.OutgoingHttpHeaders,
     credential: CredentialWithSecret,
-  ): void {
+    path?: string,
+  ): string | undefined {
     switch (credential.authType) {
       case 'bearer':
         headers.authorization = `Bearer ${credential.secret}`;
@@ -1194,11 +1196,17 @@ export class Gate {
       case 'basic':
         headers.authorization = `Basic ${Buffer.from(credential.secret).toString('base64')}`;
         break;
-      case 'query':
-        // Query params are handled in URL construction, not headers
-        // This is a simplification for v0.1
+      case 'query': {
+        if (path !== undefined) {
+          const paramName = encodeURIComponent(credential.headerName ?? 'key');
+          const paramValue = encodeURIComponent(credential.secret);
+          const separator = path.includes('?') ? '&' : '?';
+          return `${path}${separator}${paramName}=${paramValue}`;
+        }
         break;
+      }
     }
+    return path;
   }
 
   // ─── Audit Wrappers (Ledger + Dashboard Broadcast) ─────────────

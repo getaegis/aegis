@@ -311,7 +311,7 @@ Agent sends: POST http://localhost:3100/slack/api/chat.postMessage
     │      "bearer" → Authorization: Bearer xoxb-real-key              │
     │      "header" → {headerName}: xoxb-real-key                      │
     │      "basic"  → Authorization: Basic base64(xoxb-real-key)       │
-    │      "query"  → (TODO: append to URL query string)               │
+    │      "query"  → append ?{paramName}=secret to URL               │
     │    Also sets: Host: api.slack.com                                 │
     │                                                                  │
     │  STEP 7: Forward via HTTPS                                       │

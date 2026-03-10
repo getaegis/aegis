@@ -82,7 +82,7 @@ export interface WebhookManagerOptions {
   baseDelayMs?: number;
   /** Request timeout in ms (default: 10000) */
   timeoutMs?: number;
-  /** @internal For testing — override transport */
+  /** Testing: override transport */
   _testTransport?: (
     url: string,
     payload: string,
