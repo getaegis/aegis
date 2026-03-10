@@ -58,7 +58,8 @@ Each phase builds on the last. Checked items are shipped.
 - [x] stdio and streamable-http transports
 - [x] Agent authentication and credential injection through MCP
 - [x] Auto-generate config for Claude, Cursor, VS Code (`aegis mcp config`)
-- [ ] Publish to MCP registries (registry.modelcontextprotocol.io, Smithery)
+- [x] Publish to official MCP Registry (registry.modelcontextprotocol.io)
+- [ ] Publish to community MCP registries (Smithery, MCPHub)
 
 ---
 

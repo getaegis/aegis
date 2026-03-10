@@ -1,6 +1,7 @@
 {
   "name": "@getaegis/cli",
-  "version": "0.8.0",
+  "version": "0.8.1",
+  "mcpName": "io.github.getaegis/aegis",
   "description": "Credential isolation for AI agents. Store, guard, and record — your agent never sees your API keys.",
   "type": "module",
   "main": "dist/index.js",
