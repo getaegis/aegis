@@ -50,7 +50,13 @@ jobs:
 
       # --- npm publish ---
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if npm view "@getaegis/cli@${VERSION}" version 2>/dev/null; then
+            echo "Version ${VERSION} already published to npm, skipping"
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
