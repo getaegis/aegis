@@ -1022,7 +1022,11 @@ export class Gate {
       }
 
       // Inject the real credential (query auth may modify the path)
-      const injectedPath = this.injectCredential(outboundHeaders, credential, `${remainingPath}${query}`);
+      const injectedPath = this.injectCredential(
+        outboundHeaders,
+        credential,
+        `${remainingPath}${query}`,
+      );
       outboundHeaders.host = targetDomain;
 
       reqLog.debug(

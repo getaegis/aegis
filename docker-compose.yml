@@ -1,0 +1,25 @@
+services:
+  aegis:
+    build: .
+    image: ghcr.io/getaegis/aegis:latest
+    ports:
+      # Gate proxy
+      - "3100:3100"
+      # Dashboard
+      - "3200:3200"
+    volumes:
+      # Persist vault databases across restarts
+      - aegis-data:/data
+    environment:
+      # Required: master key for vault encryption
+      - AEGIS_MASTER_KEY=${AEGIS_MASTER_KEY}
+      # Required: salt for key derivation
+      - AEGIS_SALT=${AEGIS_SALT}
+      # Optional: log level (debug, info, warn, error)
+      - AEGIS_LOG_LEVEL=${AEGIS_LOG_LEVEL:-info}
+    restart: unless-stopped
+    # Override default command to also start dashboard
+    # command: ["node", "dist/cli.js", "gate", "start", "--dashboard"]
+
+volumes:
+  aegis-data:

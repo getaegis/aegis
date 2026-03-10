@@ -85,8 +85,8 @@ Each phase builds on the last. Checked items are shipped.
 
 - [x] Create GitHub org and repository
 - [x] Public-facing README, LICENSE (Apache 2.0), CONTRIBUTING, SECURITY
-- [ ] npm package (`@getaegis/cli`)
-- [ ] Docker image (multi-stage, Alpine-based)
+- [x] npm package (`@getaegis/cli`)
+- [x] Docker image (multi-stage, Debian bookworm-slim)
 - [ ] CI/CD pipeline (GitHub Actions)
 - [ ] Homebrew formula
 

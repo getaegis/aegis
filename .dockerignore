@@ -1,0 +1,42 @@
+# Dependencies (rebuilt in build stage)
+node_modules/
+dashboard/node_modules/
+
+# Build output (rebuilt in build stage)
+dist/
+dashboard/dist/
+
+# Development files
+.git/
+.github/
+.husky/
+.vscode/
+.idea/
+.tasks/
+
+# Aegis data — never include credentials
+.aegis/
+
+# Config & environment
+.env
+.env.local
+aegis.config.yaml
+policies/
+
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+LICENSE
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Test files (not needed in image)
+tests/
+vitest.config.ts
+biome.json
+
+# Scripts (not needed in image)
+scripts/
