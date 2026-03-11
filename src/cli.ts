@@ -5,9 +5,11 @@ import {
   registerAgent,
   registerConfig,
   registerDashboard,
+  registerDb,
   registerDoctor,
   registerGate,
   registerInit,
+  registerKey,
   registerLedger,
   registerMcp,
   registerPolicy,
@@ -37,12 +39,20 @@ registerLedger(program);
 registerUser(program);
 registerConfig(program);
 registerInit(program);
+registerKey(program);
 registerDoctor(program);
 registerDashboard(program);
+registerDb(program);
 
-// ── Global error handler — catch unhandled errors and print clean messages ──
+// ── Global error handlers — catch unhandled errors and print clean messages ──
 process.on('uncaughtException', (err: Error & { code?: string }) => {
   console.error(`\n✗ ${err.message}\n`);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  console.error(`\n✗ Unhandled async error: ${message}\n`);
   process.exit(1);
 });
 

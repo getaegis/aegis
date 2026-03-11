@@ -46,16 +46,29 @@ Aegis solves all four. Your agent makes HTTP calls through a local proxy. Aegis 
 npm install -g @getaegis/cli
 
 # Initialize — generates master key, config file, and encrypted vault
-aegis init --write-secrets
+aegis init
 ```
 
-`aegis init` prints a master key. Without `--write-secrets`, you must export it yourself:
+By default, `aegis init` stores the master key in your OS keychain (macOS Keychain, Windows Credential Manager, or Linux Secret Service). If no keychain is available, it falls back to a file at `.aegis/.master-key` (mode 0600).
+
+Alternative storage modes:
+
+```bash
+# Store in .env file (for CI/headless environments)
+aegis init --env-file
+
+# Store in aegis.config.yaml (convenient for local dev, not recommended for production)
+aegis init --write-secrets
+
+# Check where your master key is stored
+aegis key where
+```
+
+If you use `--env-file` or need to set the key manually:
 
 ```bash
 export AEGIS_MASTER_KEY=<key from init>
 ```
-
-With `--write-secrets`, the key is saved to `aegis.config.yaml` automatically (convenient for local dev, not recommended for production).
 
 ```bash
 # Add a credential
@@ -95,6 +108,7 @@ curl http://localhost:3100/slack/api/auth.test \
 | **RBAC** | Admin, operator, viewer roles with 16 granular permissions |
 | **Multi-Vault** | Separate vaults for dev/staging/prod with isolated encryption keys |
 | **Shamir's Secret Sharing** | M-of-N key splitting for team master key management |
+| **Cross-Platform Key Storage** | OS keychain by default (macOS Keychain, Windows Credential Manager, Linux Secret Service) with file fallback |
 | **TLS Support** | Optional HTTPS on Gate with cert/key configuration |
 | **Configuration File** | `aegis.config.yaml` with env var overrides and CLI flag overrides |
 
@@ -121,7 +135,7 @@ The MCP server replicates the full Gate security pipeline: domain guard, agent a
 
 ## Agent Identity & Scoping
 
-Without agent auth, any process on localhost can use any credential. Enable agent auth to restrict access:
+Agent authentication is **on by default**. Every request through Gate must include a valid `X-Aegis-Agent` header. Requests without a token get a helpful 401 error with instructions to create an agent.
 
 ```bash
 # Register an agent — token is printed once, save it
@@ -133,13 +147,16 @@ aegis agent grant --agent "research-bot" --credential "slack-bot"
 # Set per-agent rate limits
 aegis agent set-rate-limit --agent "research-bot" --limit 50/min
 
-# Start Gate with agent auth required
-aegis gate --require-agent-auth
+# Start Gate (agent auth is on by default)
+aegis gate
 
 # Agent must include its token in every request
 curl http://localhost:3100/slack/api/auth.test \
   -H "X-Target-Host: api.slack.com" \
   -H "X-Aegis-Agent: aegis_a1b2c3d4..."
+
+# To disable agent auth (not recommended):
+aegis gate --no-agent-auth
 ```
 
 Tokens are SHA-256 hashed for storage — they cannot be recovered, only regenerated:
@@ -209,7 +226,8 @@ aegis vault add \
 | `--ttl <days>` | *(none)* | Credential expires after this many days |
 | `--rate-limit` | *(none)* | Rate limit: `100/min`, `1000/hour`, `10/sec` |
 | `--body-inspection` | `block` | Scan outbound bodies for credential patterns: `off`, `warn`, `block` |
-| `--header-name` | — | Custom header name (only for `--auth-type header`) |
+| `--header-name` | — | Custom header name (for `--auth-type header`) |
+| `--query-param` | `key` | Query parameter name (for `--auth-type query`) |
 
 Update any field later:
 
@@ -226,7 +244,7 @@ Aegis supports four credential injection methods:
 | `bearer` | `--auth-type bearer` (default) | `Authorization: Bearer <secret>` |
 | `header` | `--auth-type header --header-name X-API-Key` | `X-API-Key: <secret>` |
 | `basic` | `--auth-type basic` | `Authorization: Basic <base64(secret)>` |
-| `query` | `--auth-type query` | Appends `?key=<secret>` to the URL |
+| `query` | `--auth-type query --query-param api_key` | Appends `?api_key=<secret>` to the URL |
 
 ## Configuration
 
@@ -468,13 +486,15 @@ Runs diagnostics on your Aegis installation:
 - Config file validation
 - Database accessibility and schema
 - Master key correctness (test decrypt)
+- Key storage backend (keychain type and status)
 - Expired or expiring-soon credentials
 
 Returns pass/warn/fail for each check.
 
 ## Security Model
 
-- **Encryption at rest** — AES-256-GCM with PBKDF2 key derivation (100k iterations, SHA-512, random per-deployment salt)
+- **Encryption at rest** — AES-256-GCM with PBKDF2 key derivation (210,000 iterations, SHA-512, random per-deployment salt)
+- **Cross-platform key storage** — master key stored in OS keychain by default (macOS Keychain, Windows Credential Manager, Linux Secret Service). File fallback for CI/headless
 - **Domain guard** — enforced on every outbound request. No bypass, no override. Wildcards supported (`*.slack.com`)
 - **Credential scopes** — `read` (GET/HEAD/OPTIONS), `write` (POST/PUT/PATCH/DELETE), `*` (all). Enforced at the Gate before any request is forwarded
 - **Header stripping** — agent-supplied `Authorization`, `X-API-Key`, `Proxy-Authorization` headers are removed before injection
@@ -484,13 +504,13 @@ Returns pass/warn/fail for each check.
 - **TLS support** — optional HTTPS on Gate (`aegis gate --tls --cert <path> --key <path>`)
 - **Graceful shutdown** — drains in-flight requests on SIGINT/SIGTERM
 
-See [SECURITY_ARCHITECTURE.md](docs/SECURITY_ARCHITECTURE.md) for the full security design, threat model, and trust boundaries.
+See [SECURITY_ARCHITECTURE.md](docs/SECURITY_ARCHITECTURE.md) for the full security design and trust boundaries, and [THREAT_MODEL.md](docs/THREAT_MODEL.md) for the STRIDE threat analysis.
 
 ## CLI Reference
 
 ```
 aegis init [--write-secrets]              Initialize Aegis (master key + config)
-aegis gate [--port] [--tls] [--require-agent-auth] [--policies-dir] [--policy-mode]
+aegis gate [--port] [--tls] [--no-agent-auth] [--policies-dir] [--policy-mode]
                                           Start the HTTP proxy
 aegis dashboard [--port] [--gate-port]    Start the web dashboard + Gate
 
@@ -552,8 +572,12 @@ aegis user regenerate-token --name <name> Regenerate user token
 aegis mcp serve [--transport] [--port]    Start the MCP server
 aegis mcp config <claude|cursor|vscode>   Generate MCP host config
 
+aegis db backup [--output <path>]         Backup the vault database
+aegis db restore --input <path> [--force] Restore from a backup
+
 aegis config validate                     Validate config file
 aegis config show                         Show resolved configuration
+aegis key where                           Show where the master key is stored
 aegis doctor                              Health check diagnostics
 ```
 
@@ -561,7 +585,7 @@ aegis doctor                              Health check diagnostics
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `AEGIS_MASTER_KEY is not set` | No master key in config or env | `export AEGIS_MASTER_KEY=<key>` or use `aegis init --write-secrets` |
+| `AEGIS_MASTER_KEY is not set` | No master key in config, env, or keychain | Run `aegis key where` to check storage, or `export AEGIS_MASTER_KEY=<key>` |
 | `Invalid master key` | Wrong key for this vault | Check `AEGIS_MASTER_KEY` matches the key from `aegis init` |
 | `Port 3100 is already in use` | Another process on that port | Use `aegis gate --port 3200` or stop the other process |
 | `Database file is corrupted` | SQLite file damaged | Back up `.aegis/` and re-run `aegis init` |
@@ -590,8 +614,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for code style, PR process, and architect
 |-------|------------|
 | Language | TypeScript (ES2022, native ESM) |
 | Runtime | Node.js ≥ 20 |
-| Database | SQLite via better-sqlite3 (WAL mode) |
-| Encryption | AES-256-GCM, PBKDF2 |
+| Database | SQLite via better-sqlite3-multiple-ciphers (WAL mode, ChaCha20-Poly1305 encryption at rest) |
+| Encryption | AES-256-GCM (field-level), ChaCha20-Poly1305 (full-database), PBKDF2 |
 | Logging | pino (structured JSON, field-level redaction) |
 | Metrics | prom-client (Prometheus) |
 | CLI | Commander.js |

@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { migrate } from '../src/db.js';
 import { Ledger } from '../src/ledger/index.js';
 import { Vault, VaultManager } from '../src/vault/index.js';
 
@@ -313,6 +315,139 @@ describe('VaultManager', () => {
       const content = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
       expect(content.vaults).toHaveLength(1);
       expect(content.vaults[0].name).toBe('test');
+    });
+  });
+
+  // ─── Database Encryption ──────────────────────────────────────
+
+  describe('database encryption', () => {
+    const MASTER_KEY = 'test-master-key-for-db-encryption';
+
+    it('creates an encrypted vault that cannot be read without the key', () => {
+      const { dbPath } = manager.create('encrypted-vault', MASTER_KEY);
+      const absoluteDbPath = path.join(tmpDir, dbPath);
+
+      // Try to open the encrypted database without a key — should fail
+      const db = new Database(absoluteDbPath);
+      expect(() => {
+        db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+      }).toThrow(); // SQLITE_NOTADB — the file is encrypted
+      db.close();
+    });
+
+    it('creates an encrypted vault that can be read with the correct key', () => {
+      manager.create('encrypted-vault', MASTER_KEY);
+
+      // Open with the correct key through openDb
+      const db = manager.openDb('encrypted-vault', MASTER_KEY);
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .all() as Array<{ name: string }>;
+      const tableNames = tables.map((t) => t.name);
+
+      expect(tableNames).toContain('credentials');
+      expect(tableNames).toContain('audit_log');
+      expect(tableNames).toContain('agents');
+      db.close();
+    });
+
+    it('rejects the wrong master key', () => {
+      manager.create('encrypted-vault', MASTER_KEY);
+
+      // Open with a wrong key — should fail
+      expect(() => {
+        manager.openDb('encrypted-vault', 'wrong-key');
+      }).toThrow();
+    });
+
+    it('writes data that is not readable as plaintext on disk', () => {
+      const { dbPath } = manager.create('encrypted-vault', MASTER_KEY);
+      const absoluteDbPath = path.join(tmpDir, dbPath);
+
+      // Write some data through the encrypted connection
+      const db = manager.openDb('encrypted-vault', MASTER_KEY);
+      db.prepare(
+        "INSERT INTO agents (id, name, token_hash, token_prefix) VALUES ('test-id', 'test-agent', 'hash123', 'prefix')",
+      ).run();
+      db.close();
+
+      // Read the raw file — the agent name should NOT appear in plaintext
+      const raw = fs.readFileSync(absoluteDbPath);
+      expect(raw.includes(Buffer.from('test-agent'))).toBe(false);
+    });
+
+    it('creates unencrypted vault when no master key is provided', () => {
+      const { dbPath } = manager.create('plain-vault');
+      const absoluteDbPath = path.join(tmpDir, dbPath);
+
+      // Should be readable without any key
+      const db = new Database(absoluteDbPath);
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .all() as Array<{ name: string }>;
+      expect(tables.length).toBeGreaterThan(0);
+      db.close();
+    });
+  });
+
+  // ─── Migration System ───────────────────────────────────────────
+
+  describe('migration system', () => {
+    it('creates a schema_version table tracking applied migrations', () => {
+      const db = new Database(':memory:');
+      migrate(db);
+
+      const versions = db
+        .prepare('SELECT version FROM schema_version ORDER BY version')
+        .all() as Array<{ version: number }>;
+      expect(versions.length).toBeGreaterThan(0);
+      expect(versions[0].version).toBe(1);
+      db.close();
+    });
+
+    it('is idempotent — running migrate twice does not error', () => {
+      const db = new Database(':memory:');
+      migrate(db);
+      migrate(db); // Should not throw
+
+      const versions = db
+        .prepare('SELECT version FROM schema_version ORDER BY version')
+        .all() as Array<{ version: number }>;
+      expect(versions).toHaveLength(1);
+      db.close();
+    });
+
+    it('creates all expected tables', () => {
+      const db = new Database(':memory:');
+      migrate(db);
+
+      const tables = db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name != 'schema_version' ORDER BY name",
+        )
+        .all() as Array<{ name: string }>;
+      const tableNames = tables.map((t) => t.name);
+
+      expect(tableNames).toContain('credentials');
+      expect(tableNames).toContain('credential_history');
+      expect(tableNames).toContain('audit_log');
+      expect(tableNames).toContain('agents');
+      expect(tableNames).toContain('agent_credentials');
+      expect(tableNames).toContain('webhooks');
+      expect(tableNames).toContain('users');
+      db.close();
+    });
+
+    it('tracks migration application timestamps', () => {
+      const db = new Database(':memory:');
+      migrate(db);
+
+      const row = db.prepare('SELECT applied_at FROM schema_version WHERE version = 1').get() as {
+        applied_at: string;
+      };
+      expect(row.applied_at).toBeDefined();
+      expect(row.applied_at).toMatch(/^\d{4}-\d{2}-\d{2}/); // ISO date format
+      db.close();
     });
   });
 });

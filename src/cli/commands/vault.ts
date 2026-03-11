@@ -36,6 +36,7 @@ export function register(program: Command): void {
     )
     .option('-a, --auth-type <type>', 'Auth injection type: bearer, header, basic, query', 'bearer')
     .option('--header-name <name>', 'Custom header name (for auth-type: header)')
+    .option('--query-param <name>', 'Query parameter name (for auth-type: query, default: "key")')
     .option('--scopes <scopes>', 'Comma-separated scopes: read, write, *', '*')
     .option('--ttl <days>', 'Credential expires after this many days')
     .option('--rate-limit <limit>', 'Rate limit: e.g. 100/min, 1000/hour, 10/sec')
@@ -48,6 +49,7 @@ export function register(program: Command): void {
         domains: string;
         authType: string;
         headerName?: string;
+        queryParam?: string;
         scopes: string;
         ttl?: string;
         rateLimit?: string;
@@ -67,6 +69,10 @@ export function register(program: Command): void {
         if (ttlDays !== undefined) validatePositiveInt(ttlDays, 'TTL (days)');
         if (opts.rateLimit) validateRateLimit(opts.rateLimit);
 
+        // --query-param sets headerName when authType is query
+        const headerName =
+          opts.queryParam && authType === 'query' ? opts.queryParam : opts.headerName;
+
         const config = getConfig();
         const db = getDb(config);
         migrate(db);
@@ -80,7 +86,7 @@ export function register(program: Command): void {
             service: opts.service,
             secret: opts.secret,
             authType,
-            headerName: opts.headerName,
+            headerName,
             domains,
             scopes: opts.scopes.split(',').map((s) => s.trim()),
             ttlDays,
@@ -92,6 +98,12 @@ export function register(program: Command): void {
           console.log(`  Name:    ${cred.name}`);
           console.log(`  Service: ${cred.service}`);
           console.log(`  Auth:    ${cred.authType}`);
+          if (cred.authType === 'header' && cred.headerName) {
+            console.log(`  Header:  ${cred.headerName}`);
+          }
+          if (cred.authType === 'query') {
+            console.log(`  Param:   ${cred.headerName ?? 'key'}`);
+          }
           console.log(`  Domains: ${cred.domains.join(', ')}`);
           console.log(`  Scopes:  ${cred.scopes.join(', ')}`);
           if (cred.expiresAt) {
@@ -230,6 +242,7 @@ export function register(program: Command): void {
     .option('--scopes <scopes>', 'New comma-separated scopes')
     .option('-a, --auth-type <type>', 'New auth injection type: bearer, header, basic, query')
     .option('--header-name <name>', 'New custom header name (for auth-type: header)')
+    .option('--query-param <name>', 'New query parameter name (for auth-type: query)')
     .option(
       '--rate-limit <limit>',
       "New rate limit: e.g. 100/min, 1000/hour (use 'none' to remove)",
@@ -242,6 +255,7 @@ export function register(program: Command): void {
         scopes?: string;
         authType?: string;
         headerName?: string;
+        queryParam?: string;
         rateLimit?: string;
         bodyInspection?: string;
       }) => {
@@ -269,12 +283,25 @@ export function register(program: Command): void {
                 : opts.rateLimit
               : undefined;
 
+          // --query-param sets headerName when authType is query
+          const resolvedAuthType = opts.authType as AuthType | undefined;
+          let headerName = opts.headerName;
+          if (opts.queryParam) {
+            if (resolvedAuthType && resolvedAuthType !== 'query') {
+              console.warn(
+                `\n⚠  --query-param is ignored when auth-type is "${resolvedAuthType}" (only applies to "query")\n`,
+              );
+            } else {
+              headerName = opts.queryParam;
+            }
+          }
+
           const cred = vaultInstance.update({
             name: opts.name,
             domains,
             scopes: opts.scopes?.split(',').map((s) => s.trim()),
             authType: opts.authType as AuthType | undefined,
-            headerName: opts.headerName,
+            headerName,
             rateLimit,
             bodyInspection: opts.bodyInspection as BodyInspectionMode | undefined,
           });
@@ -283,8 +310,11 @@ export function register(program: Command): void {
           console.log(`  Domains: ${cred.domains.join(', ')}`);
           console.log(`  Scopes:  ${cred.scopes.join(', ')}`);
           console.log(`  Auth:    ${cred.authType}`);
-          if (cred.headerName) {
+          if (cred.authType === 'header' && cred.headerName) {
             console.log(`  Header:  ${cred.headerName}`);
+          }
+          if (cred.authType === 'query') {
+            console.log(`  Param:   ${cred.headerName ?? 'key'}`);
           }
           if (cred.rateLimit) {
             console.log(`  Rate:    ${cred.rateLimit}`);

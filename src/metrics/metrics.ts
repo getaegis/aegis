@@ -40,7 +40,9 @@ export type BlockReason =
   | 'agent_rate_limit'
   | 'credential_rate_limit'
   | 'domain_guard'
-  | 'body_inspection';
+  | 'body_inspection'
+  | 'body_too_large'
+  | 'agent_connection_limit';
 
 // ─── AegisMetrics ────────────────────────────────────────────────
 

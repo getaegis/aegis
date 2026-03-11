@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AegisConfig } from '../src/config.js';
 import { migrate } from '../src/db.js';
@@ -78,6 +78,13 @@ describe('doctor', () => {
       const report = runDoctor(makeOpts());
       const keyCheck = report.checks.find((c) => c.label === 'Master key');
       expect(keyCheck?.status).toBe('pass');
+    });
+
+    it('shows key storage backend', () => {
+      const report = runDoctor(makeOpts());
+      const keyStorageCheck = report.checks.find((c) => c.label === 'Key storage');
+      expect(keyStorageCheck).toBeDefined();
+      expect(keyStorageCheck?.detail).toContain('Backend:');
     });
 
     it('warns when salt is the default value', () => {

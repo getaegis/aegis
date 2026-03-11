@@ -10,9 +10,10 @@
  * Returns a structured list of check results that the CLI can render.
  */
 
-import type Database from 'better-sqlite3';
+import type Database from 'better-sqlite3-multiple-ciphers';
 import type { AegisConfig } from './config.js';
 import { getVaultSalt, migrate } from './db.js';
+import { getKeyStorage } from './key-storage/index.js';
 import { Vault } from './vault/index.js';
 
 export interface CheckResult {
@@ -65,6 +66,26 @@ export function runDoctor(opts: DoctorOptions): DoctorReport {
     });
   } else {
     checks.push({ label: 'Master key', status: 'pass', detail: 'AEGIS_MASTER_KEY is set' });
+  }
+
+  // ── 1b. Key storage backend ────────────────────────────────────
+
+  try {
+    const keyStorage = getKeyStorage(config.dataDir);
+    const hasKeyInStore = keyStorage.getKey() !== undefined;
+    checks.push({
+      label: 'Key storage',
+      status: hasKeyInStore ? 'pass' : 'warn',
+      detail: hasKeyInStore
+        ? `Backend: ${keyStorage.name} (${keyStorage.backend}) — key present`
+        : `Backend: ${keyStorage.name} (${keyStorage.backend}) — no key stored`,
+    });
+  } catch {
+    checks.push({
+      label: 'Key storage',
+      status: 'warn',
+      detail: 'Could not detect key storage backend',
+    });
   }
 
   // ── 2. Verify database accessibility and schema ────────────────

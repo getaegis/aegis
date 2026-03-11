@@ -2,8 +2,8 @@
 
 A complete technical reference explaining how Aegis protects credentials, where data flows, what decisions were made, and why. Written so that you can audit every trust boundary yourself.
 
-**Last updated:** 10 March 2026
-**Version:** 0.7.0
+**Last updated:** 11 March 2026
+**Version:** 0.9.0
 
 ---
 
@@ -72,6 +72,10 @@ WITH AEGIS:
 | **Scope creep** | Agent uses a Slack key to call GitHub | Each credential is bound to specific service names and domains. |
 | **Unaudited actions** | Agent makes API calls you can't trace | Every request (allowed AND blocked) is recorded in the Ledger. |
 | **Replay attacks** | Someone re-sends a previously captured request | Not directly mitigated by Aegis — relies on upstream API's own protections. |
+| **Body flooding (STRIDE D-2)** | Agent sends enormous request body to exhaust memory | Configurable max body size (default 1 MB), rejects with 413 before full buffering. |
+| **Slowloris / slow read (STRIDE D-3)** | Attacker holds connections open with slow data | Server-level idle timeout + outbound request timeout (default 30s), returns 504. |
+| **Socket exhaustion (STRIDE D-1)** | Agent opens too many concurrent connections | Per-agent connection limit (default 50), returns 429 when exceeded. |
+| **Cascading upstream failure** | Failing API drags Gate down | Circuit breaker: 5 consecutive 5xx → 30s cooldown → 503 with Retry-After. |
 
 ### What we assume is trusted
 
@@ -80,7 +84,7 @@ WITH AEGIS:
 | **The machine running Aegis** | Aegis runs on localhost. If the machine is compromised, all bets are off. |
 | **The person who ran `aegis init`** | They generated the master key. If they're malicious, they already have access. |
 | **Node.js `crypto` module** | We use Node's built-in crypto which wraps OpenSSL. It's extensively audited. |
-| **SQLite via better-sqlite3** | Embedded database, no network surface. WAL mode for concurrent reads. |
+| **SQLite via better-sqlite3-multiple-ciphers** | Embedded database, no network surface. WAL mode for concurrent reads. ChaCha20-Poly1305 encryption at rest. |
 | **The upstream API** | We forward requests over HTTPS. The API itself could be compromised, but that's outside Aegis's scope. |
 
 ### What we explicitly do NOT trust
@@ -195,15 +199,20 @@ User runs `aegis init`
     ├─► crypto.randomBytes(32) generates 256-bit master key
     ├─► generateSalt() generates 256-bit random salt (also crypto.randomBytes(32))
     │
-    ├─► Default mode: secrets printed to stdout, user stores them securely
-    │   (e.g., shell profile, secrets manager, password manager)
+    ├─► Default mode: master key stored in OS keychain (macOS Keychain,
+    │   Windows Credential Manager, Linux Secret Service via secret-tool)
     │   .env gets only: AEGIS_PORT, AEGIS_DATA_DIR, AEGIS_LOG_LEVEL
     │
-    └─► --write-secrets mode: everything written to .env with file mode 0600
-        (only owner can read/write — convenient for dev, less secure for prod)
+    ├─► --env-file mode: master key written to .env with file mode 0600
+    │   (for CI/headless environments without an OS keychain)
+    │
+    ├─► --write-secrets mode: everything written to aegis.config.yaml
+    │
+    └─► Fallback (no OS keychain detected): key stored in .aegis/.master-key
+        with file mode 0600 and a warning printed to the user
 ```
 
-**Why two modes?** Writing secrets to a file on disk is a risk — any process running as your user can read `.env`. The secure default prints them once so you can store them in a proper secrets manager. The `--write-secrets` flag is there for development convenience.
+**Why OS keychain by default?** The master key in plaintext on disk (`.env`) was the biggest gap in Aegis's threat model — any process running as your user (including the AI agents Aegis protects against) could read it. OS keychains are encrypted, access-controlled, and scoped to the user's login session. On macOS, the Keychain is backed by the Secure Enclave. On Windows, DPAPI ties the key to the user's login credentials. The `--env-file` flag keeps CI workflows working.
 
 ### 4.2 Storing a Credential (`aegis vault add`)
 
@@ -219,7 +228,7 @@ User runs: aegis vault add --name slack --service slack --secret xoxb-... --doma
     │     masterKey ──┐                                           │
     │     salt ───────┤                                           │
     │                 ▼                                           │
-    │     PBKDF2-SHA512 (100,000 iterations)                      │
+    │     PBKDF2-SHA512 (210,000 iterations)                      │
     │                 │                                           │
     │                 ▼                                           │
     │     derivedKey (32 bytes / 256 bits)                        │
@@ -350,7 +359,7 @@ graph TD
     end
 
     subgraph KDF["Key Derivation (once per process)"]
-        MK --> PBKDF2["PBKDF2-SHA512<br/>100,000 iterations"]
+        MK --> PBKDF2["PBKDF2-SHA512<br/>210,000 iterations"]
         SALT --> PBKDF2
         PBKDF2 --> DK["Derived Key<br/>(32 bytes / 256 bits)<br/>Cached in Vault.derivedKey"]
     end
@@ -408,7 +417,7 @@ graph TD
 ```
 MASTER KEY (64 hex chars = 256 bits of entropy)
      │
-     │  Entered by user (env var or .env file)
+     │  Loaded from: env var → config YAML → OS keychain → empty
      │  Example: a3f8c1d9e0b7...64 hex characters
      │
      ▼
@@ -416,7 +425,7 @@ MASTER KEY (64 hex chars = 256 bits of entropy)
  │         PBKDF2               │
  │                              │
  │  Algorithm:    SHA-512       │
- │  Iterations:   100,000      │
+ │  Iterations:   210,000      │
  │  Salt:         random        │
  │                (32 bytes,    │
  │                 generated    │
@@ -433,13 +442,13 @@ MASTER KEY (64 hex chars = 256 bits of entropy)
 
 **Why PBKDF2 instead of using the master key directly?**
 - PBKDF2 is a **key derivation function** — it stretches a password/key through many iterations to make brute-force attacks computationally expensive.
-- Even though our master key is already high-entropy (256 random bits), PBKDF2 adds defense-in-depth. If someone chose a weaker master key, the 100,000 iterations slow down brute-force attempts.
+- Even though our master key is already high-entropy (256 random bits), PBKDF2 adds defense-in-depth. If someone chose a weaker master key, the 210,000 iterations slow down brute-force attempts.
 - The **salt** ensures that identical master keys on different deployments produce different derived keys. Without salt, two Aegis instances with the same master key would produce identical ciphertext for the same plaintext, which is an information leak.
 
-**Why 100,000 iterations?**
-- OWASP recommends a minimum of 600,000 for PBKDF2-SHA256 (as of 2023). We use SHA-512 which produces more work per iteration, so 100,000 is roughly equivalent.
-- The key is derived once at startup and cached, so the ~100ms cost is a one-time hit, not per-request.
-- This is a reasonable trade-off for a local tool. If Aegis becomes a server handling many concurrent inits, we should increase iterations or switch to Argon2.
+**Why 210,000 iterations?**
+- OWASP recommends a minimum of 600,000 for PBKDF2-SHA256 and 210,000 for PBKDF2-SHA512 (as of 2023). We use SHA-512, which produces roughly 2.8× more work per iteration than SHA-256, so 210,000 SHA-512 iterations meets the OWASP minimum.
+- The key is derived once at startup and cached, so the ~150-250ms cost is a one-time hit, not per-request.
+- This is a reasonable trade-off for a local tool. If Aegis becomes a server handling many concurrent inits, we should switch to Argon2id.
 
 **Why not Argon2 or scrypt?**
 - PBKDF2 is built into Node.js `crypto` — no native addon dependency.
@@ -472,7 +481,7 @@ GCM produces a 16-byte authentication tag during encryption, which is verified d
 
 ### 5.5 Key Caching
 
-The PBKDF2 derivation (100,000 iterations of SHA-512) takes ~50-150ms depending on hardware. This is intentional for security (slows brute force) but would be a performance problem if done per-request.
+The PBKDF2 derivation (210,000 iterations of SHA-512) takes ~150-250ms depending on hardware. This is intentional for security (slows brute force) but would be a performance problem if done per-request.
 
 **Solution:** The `Vault` class derives the key once in its constructor and caches it in `this.derivedKey`. This means:
 - `aegis vault add` — one derivation for the session
@@ -723,12 +732,15 @@ Here's what happens for every single request, mapped to the actual source code:
 // gate.ts — handleRequest()
 
 // Agent sends: POST http://localhost:3100/slack/api/chat.postMessage
-const reqUrl = new URL(req.url ?? "/", `http://localhost:${this.port}`);
-const pathParts = reqUrl.pathname.split("/").filter(Boolean);
+// Parse from raw URL to prevent WHATWG URL normalization attacks
+const rawUrl = req.url ?? '/';
+const qIdx = rawUrl.indexOf('?');
+const rawPath = qIdx >= 0 ? rawUrl.slice(0, qIdx) : rawUrl;
+const pathParts = rawPath.split('/').filter(Boolean);
 // pathParts = ["slack", "api", "chat.postMessage"]
 ```
 
-**Decision point:** We use `new URL()` instead of the deprecated `url.parse()`. The `URL` constructor is the WHATWG URL standard implementation — it's stricter about parsing and handles edge cases (unicode, special characters) correctly.
+**Decision point:** We parse `req.url` as a raw string instead of using `new URL()`. The WHATWG URL standard (`new URL()`) normalises percent-encoded dot segments — `%2e%2e` → `..` — and resolves path traversal. This means an agent could send `/service/%2e%2e/_aegis/health` and `new URL()` would normalise it to `/_aegis/health`, bypassing service routing and reaching internal endpoints. Raw string splitting preserves percent-encoding as-is, preventing this attack. An additional explicit guard rejects any path segment that decodes to `..` or `.`, returning 400 before routing occurs.
 
 ### Phase 2: Service Resolution
 
@@ -820,23 +832,28 @@ proxyRes.pipe(res);                // pipe response to agent
 
 ## 10. Storage Security
 
-### Database: SQLite with WAL mode
+### Database: SQLite with WAL mode and encryption at rest
 
 ```
 .aegis/
-└── aegis.db          ← single SQLite database file
+└── vaults/
+    └── default.db    ← encrypted SQLite database file (ChaCha20-Poly1305)
 ```
 
 | Setting | Value | Why |
 |---------|-------|-----|
 | **WAL mode** | `journal_mode = WAL` | Write-Ahead Logging allows concurrent reads while writing. More crash-resistant than default journal mode. |
-| **Location** | `./.aegis/aegis.db` or `AEGIS_DATA_DIR` | Local filesystem, no network database. |
-| **Encryption** | Credentials encrypted at application level | SQLite itself is not encrypted. The credential *values* are AES-256-GCM encrypted. Metadata (names, domains) is plaintext. |
+| **Location** | `./.aegis/vaults/<name>.db` or `AEGIS_DATA_DIR` | Local filesystem, no network database. |
+| **Full-database encryption** | ChaCha20-Poly1305 (sqleet cipher via SQLite3MultipleCiphers) | Entire database file is encrypted at rest — all tables, indexes, WAL/journal files. Key derived from master key via PBKDF2-SHA512 with a separate salt context (`salt-db`) to isolate from credential encryption keys. |
+| **Field-level encryption** | AES-256-GCM for credential secrets | Defense in depth — credential values are additionally encrypted at the application level. |
+| **Schema versioning** | `schema_version` table with ordered migrations | Enables safe schema evolution across upgrades. Each migration runs exactly once. |
 
-### What's in the database in plaintext
+### What's in the database (encrypted at rest, plaintext when decrypted)
 
-| Data | Where | Why plaintext |
-|------|-------|---------------|
+With full-database encryption, all data below is encrypted on disk. When the database is open (decrypted in memory), this data is accessible:
+
+| Data | Where | Why not additionally field-encrypted |
+|------|-------|--------------------------------------|
 | Credential names | `credentials.name` | Needed for lookup (`WHERE name = ?`) |
 | Service names | `credentials.service` | Needed for lookup (`WHERE service = ?`) |
 | Allowed domains | `credentials.domains` | Needed for domain guard validation |
@@ -877,7 +894,7 @@ If a token is lost, use `regenerateToken()` (or `aegis agent regenerate`) to iss
 
 ## 11. Agent Authentication
 
-Agent authentication adds identity and access control to the security model. When enabled (`--require-agent-auth`), every request through Gate must carry a valid `X-Aegis-Agent` token.
+Agent authentication adds identity and access control to the security model. Agent auth is **on by default** — every request through Gate must carry a valid `X-Aegis-Agent` token. Requests without a token receive a 401 with a helpful error message including instructions to create an agent. Use `--no-agent-auth` to disable (not recommended).
 
 ### Token Design
 
@@ -1401,18 +1418,20 @@ See discussion in [Section 5.2](#52-key-derivation-pbkdf2).
 | Limitation | Impact | Potential Fix |
 |------------|--------|---------------|
 | **No memory zeroing** | Derived key and decrypted secrets stay in V8 heap until GC | Native addon to explicitly zero Buffer contents after use |
+| **Secret visible in process args** | macOS `security` CLI and Windows `cmdkey` receive the master key as a command-line argument, which is briefly visible in `ps` output. Linux `secret-tool` reads from stdin (not affected). | Use stdin-based APIs or native bindings instead of CLI wrappers. Low-risk in practice: the window is milliseconds, on localhost, and only visible to same-user processes. |
 | **HTTPS only** | Can't proxy to HTTP APIs (rare but possible) | Add optional HTTP support with a scary warning |
 | **No mutual TLS** | Gate trusts any localhost client | Add optional mTLS for Gate-to-agent connection |
 | **Single-level wildcards only** | `*.slack.com` doesn't match `deep.api.slack.com` | Could add `**` glob support if needed |
 | **Query auth type incomplete** | `authType: "query"` is defined but not implemented | Append key to URL query string |
-| **Master key in .env** | Plaintext key on disk readable by any user-level process | OS keychain integration (macOS Keychain, Windows Credential Manager, Linux libsecret) planned |
+| **Master key in .env** | Plaintext key on disk readable by any user-level process | ~~OS keychain integration planned~~ → **Resolved in v0.8.4** via cross-platform key storage (macOS Keychain, Windows Credential Manager, Linux libsecret). `.env` and file fallback still available for CI. |
 | **In-memory rate limiter** | Rate limits reset on Gate restart | Redis or SQLite-backed limiter for persistence |
-| **PBKDF2 iteration count** | 100,000 iterations (OWASP recommends 600,000 for SHA-256) | SHA-512 provides more work per iteration, but increasing or switching to Argon2id is planned |
+| **PBKDF2 iteration count** | 210,000 iterations (meets OWASP minimum for SHA-512) | Switching to Argon2id is planned for further hardening |
 
 ### Resolved Limitations (since v0.2)
 
 | Previously a Limitation | Resolution | Version |
 |-------------------------|------------|---------|
+| Master key in .env | Cross-platform key storage: macOS Keychain, Windows Credential Manager, Linux Secret Service, with file fallback. `aegis init` stores in OS keychain by default | v0.8.4 |
 | No rate limiting | Sliding window rate limiter (per-credential and per-agent) | v0.2 |
 | No request body inspection | Body inspector with 7 credential patterns, 3 modes | v0.3 |
 | No credential rotation | `aegis vault rotate` command | v0.2 |
@@ -1422,15 +1441,19 @@ See discussion in [Section 5.2](#52-key-derivation-pbkdf2).
 | No master key splitting | Shamir's Secret Sharing (K-of-N) with seal/unseal | v0.5 |
 | No multi-vault isolation | VaultManager with per-vault databases and encryption keys | v0.5 |
 | No declarative access control | YAML policy engine with per-agent rules | v0.3 |
+| No body size limits (STRIDE D-2) | Configurable max body size with 413 rejection | v0.8.2 |
+| No request timeouts / slowloris defense (STRIDE D-3) | Server-level idle timeout + per-request outbound timeout with 504 | v0.8.2 |
+| No per-agent connection limits (STRIDE D-1) | Configurable concurrent connection cap per agent with 429 | v0.8.2 |
+| No circuit breaker for upstream failures | Circuit breaker: 5 consecutive 5xx → 30s cooldown → 503 with Retry-After | v0.8.2 |
+| No retry logic for transient failures | Automatic retry (max 2, exponential backoff) for idempotent methods on 502/503/504 | v0.8.2 |
 
 ### Future Security Enhancements
 
-1. **Hardware key storage** — integrate with OS keychain (macOS Keychain, Windows DPAPI, Linux libsecret)
-2. **IP allowlisting** — restrict which local IPs can connect to Gate
-3. **Request signing** — HMAC sign outgoing requests for additional accountability
-4. **Mutual TLS** — optional mTLS between agent and Gate
-5. **Argon2id key derivation** — memory-hard KDF for better GPU attack resistance
-6. **Persistent rate limiting** — Redis or SQLite-backed for cross-restart persistence
+1. **IP allowlisting** — restrict which local IPs can connect to Gate
+2. **Request signing** — HMAC sign outgoing requests for additional accountability
+3. **Mutual TLS** — optional mTLS between agent and Gate
+4. **Argon2id key derivation** — memory-hard KDF for better GPU attack resistance
+5. **Persistent rate limiting** — Redis or SQLite-backed for cross-restart persistence
 
 ---
 
@@ -1533,8 +1556,13 @@ Quick reference for which file implements which security function:
 | `src/logger/logger.ts` | Structured logging with 30+ redact paths, 7 credential pattern scrubbers, MCP stdio safety |
 | `src/metrics/metrics.ts` | Prometheus metrics (request counts, block reasons, durations) |
 | `src/ledger/ledger.ts` | Audit logging (allowed + blocked), agent identity tracking, JSON export |
-| `src/config.ts` | Configuration loading (YAML file + env vars), master key + salt resolution |
-| `src/db.ts` | Schema definition, WAL mode, migration |
+| `src/config.ts` | Configuration loading (YAML file + env vars), master key + salt resolution, key format validation |
+| `src/key-storage/key-storage.ts` | KeyStorage interface, getKeyStorage() platform-aware factory, commandExists() helper |
+| `src/key-storage/keychain-macos.ts` | macOS Keychain backend via `security` CLI |
+| `src/key-storage/credential-manager-windows.ts` | Windows Credential Manager backend via `cmdkey` + PowerShell |
+| `src/key-storage/secret-service-linux.ts` | Linux Secret Service backend via `secret-tool` CLI |
+| `src/key-storage/file-fallback.ts` | File-based fallback key storage (`.aegis/.master-key`, mode 0600), permission validation |
+| `src/db.ts` | Schema definition, WAL mode, ChaCha20-Poly1305 encryption at rest, migration |
 | `src/doctor.ts` | Health diagnostics, master key verification, environment validation |
 
 ## Appendix B: Encryption at a Glance
@@ -1549,6 +1577,6 @@ DECRYPT:
   If authTag doesn't verify → throw Error (tampered data)
 
 KEY DERIVATION:
-  masterKey + salt → PBKDF2(SHA-512, 100k iterations) → derivedKey
+  masterKey + salt → PBKDF2(SHA-512, 210,000 iterations) → derivedKey
   Done once per process, cached in Vault.derivedKey
 ```

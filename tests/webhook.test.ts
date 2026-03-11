@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
 import * as http from 'node:http';
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentRegistry } from '../src/agent/index.js';
 import { migrate } from '../src/db.js';

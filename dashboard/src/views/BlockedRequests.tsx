@@ -22,13 +22,20 @@ import type { AuditEntry } from '../types';
 // ─── Block Reason Badge ─────────────────────────────────────
 
 const REASON_LABELS: Record<string, string> = {
-  domain_guard: 'Domain Guard',
-  rate_limit: 'Rate Limit',
-  body_inspection: 'Body Scan',
-  policy: 'Policy',
-  no_grant: 'No Grant',
   no_credential: 'No Credential',
-  auth_failed: 'Auth Failed',
+  credential_expired: 'Expired',
+  credential_scope: 'Scope Denied',
+  agent_auth_missing: 'No Auth',
+  agent_auth_invalid: 'Auth Failed',
+  agent_scope: 'No Grant',
+  policy_violation: 'Policy',
+  policy_rate_limit: 'Policy Rate Limit',
+  agent_rate_limit: 'Agent Rate Limit',
+  credential_rate_limit: 'Rate Limit',
+  domain_guard: 'Domain Guard',
+  body_inspection: 'Body Scan',
+  body_too_large: 'Body Too Large',
+  agent_connection_limit: 'Connection Limit',
 };
 
 function BlockReasonBadge({ reason }: { reason: string }): React.ReactElement {

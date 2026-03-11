@@ -22,7 +22,7 @@ export function generateSalt(): string {
  * @param salt       Per-deployment salt (use {@link generateSalt} to create one)
  */
 export function deriveKey(masterKey: string, salt: Buffer | string = DEFAULT_SALT): Buffer {
-  return crypto.pbkdf2Sync(masterKey, salt, 100_000, KEY_LENGTH, 'sha512');
+  return crypto.pbkdf2Sync(masterKey, salt, 210_000, KEY_LENGTH, 'sha512');
 }
 
 export interface EncryptedData {

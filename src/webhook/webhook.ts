@@ -11,7 +11,7 @@
 import * as crypto from 'node:crypto';
 import * as http from 'node:http';
 import * as https from 'node:https';
-import type Database from 'better-sqlite3';
+import type Database from 'better-sqlite3-multiple-ciphers';
 import type pino from 'pino';
 import { createLogger } from '../logger/index.js';
 import type { Vault } from '../vault/index.js';

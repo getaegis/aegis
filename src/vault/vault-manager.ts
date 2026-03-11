@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import Database from 'better-sqlite3';
-import { migrate } from '../db.js';
+import Database from 'better-sqlite3-multiple-ciphers';
+import { deriveDbKey, migrate } from '../db.js';
 import { generateSalt } from './crypto.js';
 
 /**
@@ -45,7 +45,7 @@ export class VaultManager {
    * Create a new named vault with its own database and salt.
    * Returns the generated salt (the caller provides the master key).
    */
-  create(name: string): { salt: string; dbPath: string } {
+  create(name: string, masterKey?: string): { salt: string; dbPath: string } {
     if (!name) {
       throw new Error('Vault name is required.');
     }
@@ -69,6 +69,13 @@ export class VaultManager {
 
     // Create and initialize the database with the full schema
     const db = new Database(absoluteDbPath);
+
+    // Encrypt the new vault database from creation
+    if (masterKey) {
+      const dbKey = deriveDbKey(masterKey, salt);
+      db.pragma(`key="x'${dbKey.toString('hex')}'"`);
+    }
+
     db.pragma('journal_mode = WAL');
     migrate(db);
     db.close();
@@ -134,7 +141,7 @@ export class VaultManager {
    * Open the SQLite database for a named vault.
    * Caller is responsible for closing the returned database.
    */
-  openDb(name: string): Database.Database {
+  openDb(name: string, masterKey?: string): Database.Database {
     const info = this.getVaultInfo(name);
     if (!info) {
       throw new Error(
@@ -148,6 +155,13 @@ export class VaultManager {
     }
 
     const db = new Database(absoluteDbPath);
+
+    // Decrypt the vault database when a master key is available
+    if (masterKey) {
+      const dbKey = deriveDbKey(masterKey, info.salt);
+      db.pragma(`key="x'${dbKey.toString('hex')}'"`);
+    }
+
     db.pragma('journal_mode = WAL');
     migrate(db);
     return db;

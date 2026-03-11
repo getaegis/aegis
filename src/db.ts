@@ -1,13 +1,32 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import type { AegisConfig } from './config.js';
 import { VaultManager } from './vault/vault-manager.js';
+
+const DB_KEY_LENGTH = 32;
+const DB_KEY_ITERATIONS = 210_000;
+
+/**
+ * Derive a 256-bit database encryption key from the master key and salt.
+ * Uses a separate derivation context ("-db" suffix on salt) so the DB key
+ * is independent from the credential encryption key, even though both
+ * originate from the same master secret.
+ */
+export function deriveDbKey(masterKey: string, salt: string): Buffer {
+  return crypto.pbkdf2Sync(masterKey, `${salt}-db`, DB_KEY_ITERATIONS, DB_KEY_LENGTH, 'sha512');
+}
 
 /**
  * Open the SQLite database for the active vault.
  * Uses VaultManager to resolve vault name → database path.
  * Falls back to `.aegis/aegis.db` only if no vaults exist (pre-init state).
+ *
+ * When a master key is available, the database is encrypted at rest using
+ * ChaCha20-Poly1305 (sqleet cipher via SQLite3MultipleCiphers). The encryption
+ * key is derived from the master key using PBKDF2-SHA512 with a separate
+ * salt context ("-db") to isolate it from credential encryption keys.
  */
 export function getDb(config: AegisConfig): Database.Database {
   const manager = new VaultManager(config.dataDir);
@@ -28,6 +47,16 @@ export function getDb(config: AegisConfig): Database.Database {
 
   try {
     const db = new Database(dbPath);
+
+    // Encrypt the database when a master key is available.
+    // Pre-init commands (doctor, init) run without a master key — those
+    // databases remain unencrypted (and are replaced during init anyway).
+    if (config.masterKey) {
+      const salt = info ? info.salt : config.salt;
+      const dbKey = deriveDbKey(config.masterKey, salt);
+      db.pragma(`key="x'${dbKey.toString('hex')}'"`);
+    }
+
     db.pragma('journal_mode = WAL');
     return db;
   } catch (err: unknown) {
@@ -53,7 +82,55 @@ export function getVaultSalt(config: AegisConfig): string {
 }
 
 export function migrate(db: Database.Database): void {
+  // ── Schema versioning ────────────────────────────────────────────
+  // Create the version table if it doesn't exist. This is always safe
+  // because CREATE TABLE IF NOT EXISTS is idempotent.
   db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version     INTEGER PRIMARY KEY,
+      applied_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  const currentVersion = (
+    db.prepare('SELECT COALESCE(MAX(version), 0) AS v FROM schema_version').get() as { v: number }
+  ).v;
+
+  // Run all migrations that haven't been applied yet
+  const pending = MIGRATIONS.filter((m) => m.version > currentVersion);
+  if (pending.length === 0) return;
+
+  const runMigrations = db.transaction(() => {
+    for (const migration of pending) {
+      db.exec(migration.sql);
+      db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(migration.version);
+    }
+  });
+
+  runMigrations();
+}
+
+// ─── Migration definitions ──────────────────────────────────────────
+
+interface Migration {
+  version: number;
+  sql: string;
+}
+
+/**
+ * Ordered list of schema migrations. Each migration is applied exactly once.
+ * The version number must be strictly increasing.
+ *
+ * To add a new migration:
+ * 1. Add a new entry with the next version number
+ * 2. Write the SQL (ALTER TABLE, CREATE TABLE, CREATE INDEX, etc.)
+ * 3. Run `yarn build && yarn test` to verify
+ */
+const MIGRATIONS: Migration[] = [
+  {
+    // v1: Baseline schema — all tables from v0.1 through v0.8
+    version: 1,
+    sql: `
     CREATE TABLE IF NOT EXISTS credentials (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL UNIQUE,
@@ -95,6 +172,8 @@ export function migrate(db: Database.Database): void {
       status        TEXT NOT NULL DEFAULT 'allowed',
       blocked_reason TEXT,
       response_code INTEGER,
+      agent_name    TEXT,
+      agent_token_prefix TEXT,
       channel       TEXT NOT NULL DEFAULT 'gate'
     );
 
@@ -146,54 +225,8 @@ export function migrate(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_users_token_hash ON users(token_hash);
-  `);
-
-  // Migration: add expires_at column if not present (for pre-v0.2 databases)
-  const cols = db.prepare('PRAGMA table_info(credentials)').all() as Array<{ name: string }>;
-  const colNames = cols.map((c) => c.name);
-  if (!colNames.includes('expires_at')) {
-    db.exec('ALTER TABLE credentials ADD COLUMN expires_at TEXT');
-  }
-  if (!colNames.includes('rate_limit')) {
-    db.exec('ALTER TABLE credentials ADD COLUMN rate_limit TEXT');
-  }
-  if (!colNames.includes('body_inspection')) {
-    db.exec("ALTER TABLE credentials ADD COLUMN body_inspection TEXT NOT NULL DEFAULT 'block'");
-  }
-
-  // Migration: add agent identity columns to audit_log (for pre-v0.3 databases)
-  const auditCols = db.prepare('PRAGMA table_info(audit_log)').all() as Array<{ name: string }>;
-  const auditColNames = auditCols.map((c) => c.name);
-  if (!auditColNames.includes('agent_name')) {
-    db.exec('ALTER TABLE audit_log ADD COLUMN agent_name TEXT');
-  }
-  if (!auditColNames.includes('agent_token_prefix')) {
-    db.exec('ALTER TABLE audit_log ADD COLUMN agent_token_prefix TEXT');
-  }
-  if (!auditColNames.includes('channel')) {
-    db.exec("ALTER TABLE audit_log ADD COLUMN channel TEXT NOT NULL DEFAULT 'gate'");
-  }
-
-  // Migration: drop encrypted token columns from agents table (v0.3 security hardening)
-  // SQLite 3.35.0+ supports DROP COLUMN. For older versions, we recreate the table.
-  const agentCols = db.prepare('PRAGMA table_info(agents)').all() as Array<{ name: string }>;
-  const agentColNames = agentCols.map((c) => c.name);
-  if (agentColNames.includes('encrypted_token')) {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS agents_new (
-        id              TEXT PRIMARY KEY,
-        name            TEXT NOT NULL UNIQUE,
-        token_hash      TEXT NOT NULL,
-        token_prefix    TEXT NOT NULL,
-        rate_limit      TEXT,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-      INSERT OR IGNORE INTO agents_new (id, name, token_hash, token_prefix, rate_limit, created_at, updated_at)
-        SELECT id, name, token_hash, token_prefix, rate_limit, created_at, updated_at FROM agents;
-      DROP TABLE agents;
-      ALTER TABLE agents_new RENAME TO agents;
-      CREATE INDEX IF NOT EXISTS idx_agents_token_hash ON agents(token_hash);
-    `);
-  }
-}
+    `,
+  },
+  // Future migrations go here:
+  // { version: 2, sql: `ALTER TABLE ...` },
+];

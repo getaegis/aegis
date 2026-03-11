@@ -23,13 +23,14 @@ You will receive a response within 48 hours. We will work with you to understand
 Aegis is a security product — credential isolation is its core purpose. The security model includes:
 
 - **AES-256-GCM** encryption at rest with PBKDF2 key derivation
+- **Cross-platform key storage** — OS keychain by default (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 - **Domain guard** enforcement on every outbound request (no bypass)
 - **Hash-only token storage** (agent tokens and user tokens are never stored in recoverable form)
 - **Audit logging** of every request (allowed and blocked)
 - **Request body inspection** for credential exfiltration patterns
 - **Header stripping** of agent-supplied auth headers before credential injection
 
-For the full security architecture, see [SECURITY_ARCHITECTURE.md](docs/SECURITY_ARCHITECTURE.md).
+For the full security architecture, see [SECURITY_ARCHITECTURE.md](docs/SECURITY_ARCHITECTURE.md). For the STRIDE threat analysis, see [THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 ## Scope
 

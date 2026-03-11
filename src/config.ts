@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
+import { getKeyStorage } from './key-storage/index.js';
 
 // ─── Config File Schema ──────────────────────────────────────────
 
@@ -15,6 +16,12 @@ export interface GateConfig {
   require_agent_auth: boolean;
   policy_mode: 'enforce' | 'dry-run' | 'off';
   policies_dir?: string;
+  /** Maximum request body size in bytes (default: 1048576 = 1 MB). Bodies exceeding this return 413. */
+  max_body_size: number;
+  /** Request timeout in milliseconds (default: 30000 = 30s). Prevents slowloris attacks. */
+  request_timeout: number;
+  /** Maximum concurrent in-flight requests per agent (default: 50). Prevents socket exhaustion. */
+  max_connections_per_agent: number;
 }
 
 /** Vault configuration. */
@@ -74,6 +81,12 @@ export interface AegisConfig {
   dashboard: { enabled: boolean; port: number };
   mcp: { transport: 'stdio' | 'streamable-http'; port: number };
   webhooks: WebhookConfigEntry[];
+  /** Maximum request body size in bytes (default: 1 MB). */
+  maxBodySize: number;
+  /** Request timeout in milliseconds (default: 30s). */
+  requestTimeout: number;
+  /** Max concurrent in-flight requests per agent (default: 50). */
+  maxConnectionsPerAgent: number;
   /** Path to the config file used, if any. */
   configFilePath?: string;
 }
@@ -88,12 +101,15 @@ const DEFAULTS: AegisConfig = {
   logLevel: 'info',
   logFormat: 'json',
   vaultName: 'default',
-  requireAgentAuth: false,
+  requireAgentAuth: true,
   policyMode: 'enforce',
   metricsEnabled: true,
   dashboard: { enabled: false, port: 3200 },
   mcp: { transport: 'stdio', port: 3200 },
   webhooks: [],
+  maxBodySize: 1_048_576, // 1 MB
+  requestTimeout: 30_000, // 30 seconds
+  maxConnectionsPerAgent: 50,
 };
 
 // ─── Config File Discovery ────────────────────────────────────────
@@ -210,6 +226,30 @@ export function validateConfigFile(config: AegisConfigFile): ConfigValidationErr
     }
     if (config.gate.policies_dir !== undefined && typeof config.gate.policies_dir !== 'string') {
       errors.push({ path: 'gate.policies_dir', message: 'Must be a string path.' });
+    }
+    if (config.gate.max_body_size !== undefined) {
+      if (typeof config.gate.max_body_size !== 'number' || config.gate.max_body_size < 1) {
+        errors.push({ path: 'gate.max_body_size', message: 'Must be a positive number (bytes).' });
+      }
+    }
+    if (config.gate.request_timeout !== undefined) {
+      if (typeof config.gate.request_timeout !== 'number' || config.gate.request_timeout < 1000) {
+        errors.push({
+          path: 'gate.request_timeout',
+          message: 'Must be a number >= 1000 (milliseconds).',
+        });
+      }
+    }
+    if (config.gate.max_connections_per_agent !== undefined) {
+      if (
+        typeof config.gate.max_connections_per_agent !== 'number' ||
+        config.gate.max_connections_per_agent < 1
+      ) {
+        errors.push({
+          path: 'gate.max_connections_per_agent',
+          message: 'Must be a positive number.',
+        });
+      }
     }
   }
 
@@ -396,12 +436,25 @@ export function getConfig(): AegisConfig {
     fs.mkdirSync(dataDir, { recursive: true });
   }
 
-  // Master key resolution: env → config file → unseal key file → empty
+  // Master key resolution: env → config file → OS keychain → unseal key file → empty
   let masterKey = getEnv('AEGIS_MASTER_KEY') ?? fileConfig.vault?.master_key ?? '';
   if (!masterKey) {
-    const unsealKeyPath = path.join(dataDir, '.unseal-key');
-    if (fs.existsSync(unsealKeyPath)) {
-      masterKey = fs.readFileSync(unsealKeyPath, 'utf-8').trim();
+    try {
+      const keyStorage = getKeyStorage(dataDir);
+      masterKey = keyStorage.getKey() ?? '';
+    } catch {
+      // Key storage not available — continue without key
+    }
+  }
+
+  // Validate master key format: must be 64 hex chars (256-bit key)
+  if (masterKey && !/^[0-9a-f]{64}$/i.test(masterKey)) {
+    // Warn but don't reject — legacy keys or test keys may differ
+    if (typeof process !== 'undefined' && process.stderr) {
+      process.stderr.write(
+        '⚠  Master key format warning: expected 64 hex characters (256-bit key).\n' +
+          '   Decryption may fail if the key is invalid.\n',
+      );
     }
   }
 
@@ -430,10 +483,12 @@ export function getConfig(): AegisConfig {
   // Resolve TLS: config file
   const tls = fileConfig.gate?.tls;
 
-  // Resolve agent auth: env → config file → default
+  // Resolve agent auth: env → config file → default (on by default since v0.8.2)
+  const envAgentAuth = getEnv('AEGIS_REQUIRE_AGENT_AUTH');
   const requireAgentAuth =
-    getEnv('AEGIS_REQUIRE_AGENT_AUTH') === 'true' ||
-    (fileConfig.gate?.require_agent_auth ?? DEFAULTS.requireAgentAuth);
+    envAgentAuth !== undefined
+      ? envAgentAuth === 'true'
+      : (fileConfig.gate?.require_agent_auth ?? DEFAULTS.requireAgentAuth);
 
   // Resolve policy mode: env → config file → default
   const policyMode = (getEnv('AEGIS_POLICY_MODE') ??
@@ -465,6 +520,12 @@ export function getConfig(): AegisConfig {
   // Webhooks from config file
   const webhooks = fileConfig.webhooks ?? DEFAULTS.webhooks;
 
+  // Resolve Gate hardening: config file → defaults
+  const maxBodySize = fileConfig.gate?.max_body_size ?? DEFAULTS.maxBodySize;
+  const requestTimeout = fileConfig.gate?.request_timeout ?? DEFAULTS.requestTimeout;
+  const maxConnectionsPerAgent =
+    fileConfig.gate?.max_connections_per_agent ?? DEFAULTS.maxConnectionsPerAgent;
+
   return {
     port,
     masterKey,
@@ -481,6 +542,9 @@ export function getConfig(): AegisConfig {
     dashboard,
     mcp,
     webhooks,
+    maxBodySize,
+    requestTimeout,
+    maxConnectionsPerAgent,
     configFilePath: configFilePath ?? undefined,
   };
 }

@@ -51,9 +51,9 @@ export interface GateOptions {
   tls?: TlsOptions;
   /** Maximum time (ms) to wait for in-flight requests during shutdown (default: 10000) */
   shutdownTimeoutMs?: number;
-  /** Agent registry — required when requireAgentAuth is true */
+  /** Agent registry — required when agent auth is enabled (default) */
   agentRegistry?: AgentRegistry;
-  /** When true, every request must include a valid X-Aegis-Agent token */
+  /** When true (default), every request must include a valid X-Aegis-Agent token. Use --no-agent-auth to disable. */
   requireAgentAuth?: boolean;
   /** Directory containing YAML policy files — enables policy evaluation */
   policyDir?: string;
@@ -65,6 +65,12 @@ export interface GateOptions {
   webhooks?: WebhookManager;
   /** Callback fired after every audit entry is logged — used by dashboard for live feed */
   onAuditEntry?: (entry: AuditBroadcast) => void;
+  /** Maximum request body size in bytes (default: 1 MB). Bodies exceeding this return 413. */
+  maxBodySize?: number;
+  /** Request timeout in milliseconds (default: 30s). Covers both inbound and outbound. */
+  requestTimeout?: number;
+  /** Maximum concurrent in-flight requests per agent (default: 50). */
+  maxConnectionsPerAgent?: number;
   /** Testing: redirect outbound requests to a local server */
   _testUpstream?: { protocol: 'http' | 'https'; hostname: string; port: number };
   /** Testing: inject policies directly without loading from disk */
@@ -118,6 +124,17 @@ export class Gate {
   private metrics?: AegisMetrics;
   private webhooks?: WebhookManager;
   private onAuditEntry?: (entry: AuditBroadcast) => void;
+  private maxBodySize: number;
+  private requestTimeout: number;
+  private maxConnectionsPerAgent: number;
+  /** Tracks in-flight request count per agent (keyed by agent ID). */
+  private agentConnections = new Map<string, number>();
+  /** Tracks upstream service failures for circuit breaker (keyed by service name). */
+  private circuitBreaker = new Map<string, { failures: number; openUntil: number }>();
+  /** Dedicated HTTP agent for outbound proxy requests (connection pooling with keep-alive). */
+  private httpAgent: http.Agent;
+  /** Dedicated HTTPS agent for outbound proxy requests (connection pooling with keep-alive + TLS session reuse). */
+  private httpsAgent: https.Agent;
 
   constructor(options: GateOptions) {
     this.vault = options.vault;
@@ -133,12 +150,31 @@ export class Gate {
     this.bodyInspector = new BodyInspector();
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 10_000;
     this.agentRegistry = options.agentRegistry;
-    this.requireAgentAuth = options.requireAgentAuth ?? false;
+    this.requireAgentAuth = options.requireAgentAuth ?? true;
     this.policyMode = options.policyMode ?? 'enforce';
     this.policyDir = options.policyDir;
     this.metrics = options.metrics;
     this.webhooks = options.webhooks;
     this.onAuditEntry = options.onAuditEntry;
+    this.maxBodySize = options.maxBodySize ?? 1_048_576; // 1 MB
+    this.requestTimeout = options.requestTimeout ?? 30_000; // 30 seconds
+    this.maxConnectionsPerAgent = options.maxConnectionsPerAgent ?? 50;
+
+    // Dedicated connection pool agents for outbound proxy requests.
+    // keepAlive: true  — reuse TCP connections across requests (avoids TCP+TLS handshake per request)
+    // maxSockets: 256  — cap concurrent sockets per upstream host (prevents socket exhaustion)
+    // maxFreeSockets: 64 — keep up to 64 idle sockets per host in the pool
+    // scheduling: 'lifo' — reuse most-recent socket first (reduces stale connection risk)
+    // timeout: 60s — idle socket timeout (close sockets unused for 60s)
+    const poolOptions = {
+      keepAlive: true,
+      maxSockets: 256,
+      maxFreeSockets: 64,
+      scheduling: 'lifo' as const,
+      timeout: 60_000,
+    };
+    this.httpAgent = new http.Agent(poolOptions);
+    this.httpsAgent = new https.Agent(poolOptions);
 
     // Load policies from disk or test injection
     if (options._testPolicies) {
@@ -282,6 +318,15 @@ export class Gate {
         if (addr && typeof addr === 'object') {
           this.port = addr.port;
         }
+
+        // Set server-level idle timeout to defend against slowloris attacks.
+        // Only covers idle socket time — outbound proxy has its own `timeout` option.
+        // Provide a custom callback so the default auto-destroy doesn't kill sockets
+        // that are legitimately waiting for upstream responses.
+        this.server?.setTimeout(this.requestTimeout, (socket: import('node:net').Socket) => {
+          socket.destroy();
+        });
+
         const protocol = this.tlsOptions ? 'https' : 'http';
         this.logger.info(
           { protocol, port: this.port },
@@ -331,12 +376,17 @@ export class Gate {
 
     return new Promise((resolve) => {
       if (!this.server) {
+        this.httpAgent.destroy();
+        this.httpsAgent.destroy();
         resolve({ drained: true, activeAtClose: 0 });
         return;
       }
 
       const finish = (drained: boolean): void => {
         const activeAtClose = this.activeRequests;
+        // Destroy connection pool agents — close all keep-alive sockets
+        this.httpAgent.destroy();
+        this.httpsAgent.destroy();
         if (!drained) {
           // Force-destroy remaining connections so server.close() can complete
           this.server?.closeAllConnections();
@@ -416,8 +466,35 @@ export class Gate {
     const reqLog = this.logger.child({ requestId });
 
     try {
-      const reqUrl = new URL(req.url ?? '/', `http://localhost:${this.port}`);
-      const pathParts = reqUrl.pathname.split('/').filter(Boolean);
+      // Parse path segments from the RAW URL (not via new URL()) to prevent
+      // percent-encoded path traversal. new URL() normalises %2e%2e → .. and
+      // resolves /../, which would let an agent escape service routing and
+      // reach internal /_aegis/* endpoints via /service/%2e%2e/_aegis/health.
+      const rawUrl = req.url ?? '/';
+      const qIdx = rawUrl.indexOf('?');
+      const rawPath = qIdx >= 0 ? rawUrl.slice(0, qIdx) : rawUrl;
+      const rawQuery = qIdx >= 0 ? rawUrl.slice(qIdx) : '';
+      const pathParts = rawPath.split('/').filter(Boolean);
+
+      // Explicit path traversal guard: reject any segment that decodes to
+      // ".." or "." — belt-and-suspenders defense on top of raw parsing.
+      // The service lookup would naturally reject these, but blocking here
+      // produces a clear 400 and audit trail entry for traversal attempts.
+      const hasTraversal = pathParts.some((seg) => {
+        if (seg === '..' || seg === '.') return true;
+        try {
+          const decoded = decodeURIComponent(seg);
+          return decoded === '..' || decoded === '.';
+        } catch {
+          return false;
+        }
+      });
+      if (hasTraversal) {
+        reqLog.warn({ path: rawPath }, 'Blocked: path traversal attempt');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(`${JSON.stringify({ error: 'Path traversal detected' })}\n`);
+        return;
+      }
 
       // Health check
       if (pathParts[0] === '_aegis' && pathParts[1] === 'health') {
@@ -477,7 +554,7 @@ export class Gate {
           res.end(
             `${JSON.stringify({
               error: 'Agent authentication required',
-              hint: 'Include X-Aegis-Agent header with your agent token',
+              hint: "Include X-Aegis-Agent header with your agent token. Run 'aegis agent add --name my-agent' to create one.",
             })}\n`,
           );
           return;
@@ -522,6 +599,49 @@ export class Gate {
             reqLog.debug({ agent: agent.name, tokenPrefix: agent.tokenPrefix }, 'Identified agent');
           }
         }
+      }
+
+      // ─── Per-Agent Connection Limits ─────────────────────────────────
+      // Prevent a single agent from exhausting all available connections
+      // by tracking in-flight requests per agent.
+      if (authenticatedAgent) {
+        const agentId = authenticatedAgent.id;
+        const currentConnections = this.agentConnections.get(agentId) ?? 0;
+        if (currentConnections >= this.maxConnectionsPerAgent) {
+          reqLog.warn(
+            {
+              agent: authenticatedAgent.name,
+              current: currentConnections,
+              max: this.maxConnectionsPerAgent,
+            },
+            'Blocked: per-agent connection limit exceeded',
+          );
+          this.metrics?.recordBlocked(
+            pathParts[0] ?? 'unknown',
+            'agent_connection_limit',
+            authenticatedAgent.name,
+          );
+          res.writeHead(429, { 'Content-Type': 'application/json' });
+          res.end(
+            `${JSON.stringify({
+              error: 'Too many concurrent requests for this agent',
+              agent: authenticatedAgent.name,
+              limit: this.maxConnectionsPerAgent,
+              hint: 'Wait for in-flight requests to complete or increase gate.max_connections_per_agent',
+            })}\n`,
+          );
+          return;
+        }
+        this.agentConnections.set(agentId, currentConnections + 1);
+        // Decrement on response close
+        res.on('close', () => {
+          const count = this.agentConnections.get(agentId) ?? 1;
+          if (count <= 1) {
+            this.agentConnections.delete(agentId);
+          } else {
+            this.agentConnections.set(agentId, count - 1);
+          }
+        });
       }
 
       // Route format: /{service}/rest/of/the/path
@@ -970,7 +1090,7 @@ export class Gate {
       const agentRequestedHost = (req.headers['x-target-host'] as string | undefined) ?? undefined;
       const targetDomain = agentRequestedHost ?? credential.domains[0];
       const remainingPath = `/${pathParts.slice(1).join('/')}`;
-      const query = reqUrl.search ?? '';
+      const query = rawQuery;
 
       // Domain guard: verify target domain is in the credential's allowlist
       // This is the core security boundary — blocks agents from exfiltrating
@@ -1037,13 +1157,54 @@ export class Gate {
       // Start request duration timer for Prometheus histogram
       const stopTimer = this.metrics?.startRequestTimer(serviceName);
 
-      // Buffer the request body for inspection before forwarding
+      // Buffer the request body for inspection before forwarding.
+      // Enforce max body size to prevent memory exhaustion.
       const bodyChunks: Buffer[] = [];
+      let bodySize = 0;
+      let bodySizeExceeded = false;
+
       req.on('data', (chunk: Buffer) => {
-        bodyChunks.push(chunk);
+        bodySize += chunk.length;
+        if (bodySize > this.maxBodySize) {
+          bodySizeExceeded = true;
+          // Stop buffering — we'll reject in the 'end' handler.
+          // Don't destroy the stream (that kills the socket before we can respond).
+        } else {
+          bodyChunks.push(chunk);
+        }
       });
 
       req.on('end', () => {
+        // Reject oversized bodies
+        if (bodySizeExceeded) {
+          reqLog.warn(
+            { service: serviceName, bodySize, maxBodySize: this.maxBodySize },
+            'Blocked: request body too large',
+          );
+          this.auditBlocked({
+            service: serviceName,
+            targetDomain,
+            method: req.method ?? 'GET',
+            path: remainingPath,
+            reason: 'Body too large',
+          });
+          this.metrics?.recordBlocked(serviceName, 'body_too_large', authenticatedAgent?.name);
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(
+            `${JSON.stringify({
+              error: 'Request body too large',
+              received: bodySize,
+              limit: this.maxBodySize,
+              hint: 'Reduce body size or increase gate.max_body_size in aegis.config.yaml',
+            })}\n`,
+          );
+          return;
+        }
+
+        // Clear the server-level idle timeout — the body is fully received,
+        // so slowloris is no longer a risk. The outbound proxy timeout handles upstream delays.
+        req.socket?.setTimeout(0);
+
         const bodyBuffer = Buffer.concat(bodyChunks);
         const bodyString = bodyBuffer.toString('utf-8');
 
@@ -1096,89 +1257,210 @@ export class Gate {
           }
         }
 
-        // Forward the request
+        // ─── Circuit Breaker Check ────────────────────────────────────
+        // If the upstream service has been failing repeatedly, short-circuit
+        // with 503 instead of adding more load to a struggling service.
+        const circuitState = this.circuitBreaker.get(serviceName);
+        if (circuitState && circuitState.openUntil > Date.now()) {
+          reqLog.warn(
+            { service: serviceName, failures: circuitState.failures },
+            'Blocked: circuit breaker open',
+          );
+          if (!res.headersSent) {
+            const retryAfterSeconds = Math.ceil((circuitState.openUntil - Date.now()) / 1000);
+            res.writeHead(503, {
+              'Content-Type': 'application/json',
+              'Retry-After': String(retryAfterSeconds),
+            });
+            res.end(
+              `${JSON.stringify({
+                error: 'Service temporarily unavailable (circuit breaker open)',
+                service: serviceName,
+                retryAfter: retryAfterSeconds,
+                hint: 'The upstream service has been failing repeatedly. Requests will resume automatically.',
+              })}\n`,
+            );
+          }
+          return;
+        }
+
+        // Forward the request with timeout and retry for transient failures
         const upstream = this.testUpstream;
         const transport = upstream?.protocol === 'http' ? http : https;
-        const proxyReq = transport.request(
-          {
-            hostname: upstream?.hostname ?? targetDomain,
-            port: upstream?.port ?? 443,
-            path: injectedPath ?? `${remainingPath}${query}`,
-            method: req.method,
-            headers: outboundHeaders,
-          },
-          (proxyRes) => {
-            // Strip any credential info from response headers
-            const safeHeaders = { ...proxyRes.headers };
-            delete safeHeaders['set-cookie']; // Prevent session hijack via agent
+        const agent = upstream?.protocol === 'http' ? this.httpAgent : this.httpsAgent;
+        const maxRetries = 2; // original + 2 retries = 3 total attempts
 
-            this.auditAllowed({
-              credentialId: credential.id,
-              credentialName: credential.name,
-              service: serviceName,
-              targetDomain,
-              method: req.method ?? 'GET',
-              path: remainingPath,
-              responseCode: proxyRes.statusCode,
-              agentName: authenticatedAgent?.name,
-              agentTokenPrefix: authenticatedAgent?.tokenPrefix,
-            });
+        const attemptProxy = (attempt: number): void => {
+          const proxyReq = transport.request(
+            {
+              hostname: upstream?.hostname ?? targetDomain,
+              port: upstream?.port ?? 443,
+              path: injectedPath ?? `${remainingPath}${query}`,
+              method: req.method,
+              headers: outboundHeaders,
+              timeout: this.requestTimeout,
+              agent,
+            },
+            (proxyRes) => {
+              const statusCode = proxyRes.statusCode ?? 500;
 
-            reqLog.info(
-              {
-                service: serviceName,
-                method: req.method,
-                path: remainingPath,
-                status: proxyRes.statusCode,
-              },
-              'Request proxied',
-            );
+              // Retry on transient upstream failures (502, 503, 504) if retries remain
+              // Only retry idempotent methods (GET, HEAD, OPTIONS) — never retry state-changing methods
+              const isRetryable =
+                (statusCode === 502 || statusCode === 503 || statusCode === 504) &&
+                attempt < maxRetries &&
+                READ_METHODS.has(req.method?.toUpperCase() ?? 'GET');
 
-            stopTimer?.();
-            this.metrics?.recordRequest(
-              serviceName,
-              req.method ?? 'GET',
-              proxyRes.statusCode ?? 500,
-              authenticatedAgent?.name,
-            );
+              if (isRetryable) {
+                reqLog.info(
+                  { service: serviceName, status: statusCode, attempt: attempt + 1 },
+                  'Retrying transient upstream failure',
+                );
+                // Consume the response body before retrying
+                proxyRes.resume();
+                // Exponential backoff: 500ms, 1000ms
+                const backoff = 500 * (attempt + 1);
+                setTimeout(() => attemptProxy(attempt + 1), backoff);
+                return;
+              }
 
-            res.writeHead(proxyRes.statusCode ?? 500, safeHeaders);
-            proxyRes.pipe(res);
-          },
-        );
+              // Record circuit breaker state on upstream failures
+              if (statusCode >= 500) {
+                this.recordCircuitFailure(serviceName);
+              } else {
+                // Success — reset circuit breaker for this service
+                this.circuitBreaker.delete(serviceName);
+              }
 
-        proxyReq.on('error', (err) => {
-          reqLog.error({ service: serviceName, err: err.message }, 'Proxy error');
-          if (!this.shuttingDown) {
-            try {
-              this.auditBlocked({
+              // Strip any credential info from response headers
+              const safeHeaders = { ...proxyRes.headers };
+              delete safeHeaders['set-cookie']; // Prevent session hijack via agent
+
+              this.auditAllowed({
+                credentialId: credential.id,
+                credentialName: credential.name,
                 service: serviceName,
                 targetDomain,
                 method: req.method ?? 'GET',
                 path: remainingPath,
-                reason: `Proxy error: ${err.message}`,
+                responseCode: statusCode,
+                agentName: authenticatedAgent?.name,
+                agentTokenPrefix: authenticatedAgent?.tokenPrefix,
               });
-            } catch {
-              // Ledger may be unavailable during shutdown cleanup
-            }
-          }
-          if (!res.headersSent) {
-            res.writeHead(502, { 'Content-Type': 'application/json' });
-            res.end(`${JSON.stringify({ error: 'Failed to reach upstream service' })}\n`);
-          }
-        });
 
-        // Write the buffered body and end
-        if (bodyBuffer.length > 0) {
-          proxyReq.write(bodyBuffer);
-        }
-        proxyReq.end();
+              reqLog.info(
+                {
+                  service: serviceName,
+                  method: req.method,
+                  path: remainingPath,
+                  status: statusCode,
+                },
+                'Request proxied',
+              );
+
+              stopTimer?.();
+              this.metrics?.recordRequest(
+                serviceName,
+                req.method ?? 'GET',
+                statusCode,
+                authenticatedAgent?.name,
+              );
+
+              res.writeHead(statusCode, safeHeaders);
+              proxyRes.pipe(res);
+            },
+          );
+
+          // Outbound request timeout — fires if upstream takes too long
+          proxyReq.on('timeout', () => {
+            proxyReq.destroy(new Error('upstream request timed out'));
+          });
+
+          proxyReq.on('error', (err) => {
+            // Retry on ECONNRESET / socket hang up when using a reused (keep-alive) socket.
+            // The server may have closed the idle connection before our request arrived.
+            const isStaleSocket =
+              (err.message.includes('ECONNRESET') || err.message.includes('socket hang up')) &&
+              proxyReq.reusedSocket;
+
+            if (isStaleSocket && attempt < maxRetries) {
+              reqLog.info(
+                { service: serviceName, attempt: attempt + 1 },
+                'Retrying after stale socket error on reused connection',
+              );
+              attemptProxy(attempt + 1);
+              return;
+            }
+
+            reqLog.error({ service: serviceName, err: err.message }, 'Proxy error');
+
+            // Record the failure for circuit breaker
+            this.recordCircuitFailure(serviceName);
+
+            if (!this.shuttingDown) {
+              try {
+                this.auditBlocked({
+                  service: serviceName,
+                  targetDomain,
+                  method: req.method ?? 'GET',
+                  path: remainingPath,
+                  reason: `Proxy error: ${err.message}`,
+                });
+              } catch {
+                // Ledger may be unavailable during shutdown cleanup
+              }
+            }
+            if (!res.headersSent) {
+              const isTimeout = err.message.includes('timed out');
+              const statusCode = isTimeout ? 504 : 502;
+              const errorMessage = isTimeout
+                ? 'Upstream request timed out'
+                : 'Failed to reach upstream service';
+              res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+              res.end(
+                `${JSON.stringify({
+                  error: errorMessage,
+                  service: serviceName,
+                })}\n`,
+              );
+            }
+          });
+
+          // Write the buffered body and end
+          if (bodyBuffer.length > 0) {
+            proxyReq.write(bodyBuffer);
+          }
+          proxyReq.end();
+        };
+
+        attemptProxy(0);
       });
     } catch (err) {
       reqLog.error({ err }, 'Unhandled error');
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(`${JSON.stringify({ error: 'Internal Aegis Gate error' })}\n`);
     }
+  }
+
+  /**
+   * Record an upstream failure for circuit breaker logic.
+   * After 5 consecutive failures, the circuit opens for 30 seconds.
+   */
+  private recordCircuitFailure(service: string): void {
+    const state = this.circuitBreaker.get(service) ?? { failures: 0, openUntil: 0 };
+    state.failures++;
+
+    // Open the circuit after 5 consecutive failures (30s cooldown)
+    const FAILURE_THRESHOLD = 5;
+    const COOLDOWN_MS = 30_000;
+    if (state.failures >= FAILURE_THRESHOLD) {
+      state.openUntil = Date.now() + COOLDOWN_MS;
+      this.logger.warn(
+        { service, failures: state.failures, cooldownMs: COOLDOWN_MS },
+        'Circuit breaker opened — service failures exceeded threshold',
+      );
+    }
+    this.circuitBreaker.set(service, state);
   }
 
   /**

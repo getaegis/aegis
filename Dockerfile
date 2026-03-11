@@ -3,7 +3,7 @@
 # ============================================================
 FROM node:24-bookworm-slim AS build
 
-# Native deps for better-sqlite3 compilation + dumb-init
+# Native deps for better-sqlite3-multiple-ciphers compilation + dumb-init
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dumb-init \
     g++ \

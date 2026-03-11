@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { deriveDbKey } from '../src/db.js';
 import { decrypt, deriveKey, encrypt, generateSalt } from '../src/vault/crypto.js';
 
 describe('crypto', () => {
@@ -67,5 +68,40 @@ describe('crypto', () => {
     const b = encrypt(plaintext, key);
     expect(a.iv.equals(b.iv)).toBe(false);
     expect(a.encrypted.equals(b.encrypted)).toBe(false);
+  });
+});
+
+describe('deriveDbKey', () => {
+  const masterKey = 'test-master-key-for-db-encryption';
+  const salt = 'test-salt-value';
+
+  it('returns a 32-byte buffer', () => {
+    const key = deriveDbKey(masterKey, salt);
+    expect(key).toBeInstanceOf(Buffer);
+    expect(key.length).toBe(32);
+  });
+
+  it('is deterministic', () => {
+    const k1 = deriveDbKey(masterKey, salt);
+    const k2 = deriveDbKey(masterKey, salt);
+    expect(k1.equals(k2)).toBe(true);
+  });
+
+  it('produces a different key from deriveKey with the same inputs', () => {
+    const credKey = deriveKey(masterKey, salt);
+    const dbKey = deriveDbKey(masterKey, salt);
+    expect(credKey.equals(dbKey)).toBe(false);
+  });
+
+  it('different salts produce different DB keys', () => {
+    const k1 = deriveDbKey(masterKey, 'salt-a');
+    const k2 = deriveDbKey(masterKey, 'salt-b');
+    expect(k1.equals(k2)).toBe(false);
+  });
+
+  it('different master keys produce different DB keys', () => {
+    const k1 = deriveDbKey('key-a', salt);
+    const k2 = deriveDbKey('key-b', salt);
+    expect(k1.equals(k2)).toBe(false);
   });
 });

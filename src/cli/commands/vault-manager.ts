@@ -48,7 +48,7 @@ export function register(parent: Command): void {
       const manager = new VaultManager(config.dataDir);
 
       try {
-        const { salt } = manager.create(opts.name);
+        const { salt } = manager.create(opts.name, config.masterKey || undefined);
 
         console.log(`\n  ✓ Vault "${opts.name}" created\n`);
         console.log(`  Salt:     ${salt}`);

@@ -28,7 +28,10 @@ export function register(program: Command): void {
     .option('--tls', 'Enable TLS (HTTPS) on Gate')
     .option('--cert <path>', 'Path to TLS certificate file (PEM)')
     .option('--key <path>', 'Path to TLS private key file (PEM)')
-    .option('--require-agent-auth', 'Require X-Aegis-Agent token on every request')
+    .option(
+      '--no-agent-auth',
+      'Disable agent authentication (allows any localhost process to use credentials)',
+    )
     .option('--policies-dir <path>', 'Directory containing YAML policy files')
     .option('--policy-mode <mode>', 'Policy enforcement mode: enforce, dry-run, or off')
     .action(
@@ -38,7 +41,7 @@ export function register(program: Command): void {
         tls?: boolean;
         cert?: string;
         key?: string;
-        requireAgentAuth?: boolean;
+        agentAuth?: boolean;
         policiesDir?: string;
         policyMode?: string;
       }) => {
@@ -119,7 +122,8 @@ export function register(program: Command): void {
         }
 
         // Resolve policy: CLI flags → config file
-        const effectiveRequireAgentAuth = opts.requireAgentAuth ?? config.requireAgentAuth;
+        const effectiveRequireAgentAuth =
+          opts.agentAuth !== undefined ? opts.agentAuth : config.requireAgentAuth;
         const effectivePolicyMode =
           (opts.policyMode as 'enforce' | 'dry-run' | undefined) ??
           (config.policyMode === 'off' ? undefined : (config.policyMode as 'enforce' | 'dry-run'));
@@ -169,6 +173,9 @@ export function register(program: Command): void {
           webhooks: webhookManager,
           metrics,
           onAuditEntry: (entry) => dashboard.broadcast(entry),
+          maxBodySize: config.maxBodySize,
+          requestTimeout: config.requestTimeout,
+          maxConnectionsPerAgent: config.maxConnectionsPerAgent,
         });
 
         const protocol = tlsConfig ? 'https' : 'http';
@@ -183,6 +190,10 @@ export function register(program: Command): void {
 
         if (effectiveRequireAgentAuth) {
           console.log('  🔑 Agent authentication required\n');
+        } else {
+          console.log(
+            '  ⚠  Agent authentication disabled — any localhost process can use credentials\n',
+          );
         }
 
         if (metrics) {

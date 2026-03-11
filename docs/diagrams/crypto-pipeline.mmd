@@ -5,7 +5,7 @@ graph TD
     end
 
     subgraph KDF["Key Derivation (once per process)"]
-        MK --> PBKDF2["PBKDF2-SHA512<br/>100,000 iterations"]
+        MK --> PBKDF2["PBKDF2-SHA512<br/>210,000 iterations"]
         SALT --> PBKDF2
         PBKDF2 --> DK["Derived Key<br/>(32 bytes / 256 bits)<br/>Cached in Vault.derivedKey"]
     end

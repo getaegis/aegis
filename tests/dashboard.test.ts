@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
 import * as http from 'node:http';
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { AgentRegistry } from '../src/agent/index.js';
@@ -51,7 +51,7 @@ describe('DashboardServer', () => {
     migrate(db);
     vault = new Vault(db, MASTER_KEY, SALT);
     ledger = new Ledger(db);
-    const derivedKey = crypto.pbkdf2Sync(MASTER_KEY, SALT, 100000, 32, 'sha512');
+    const derivedKey = crypto.pbkdf2Sync(MASTER_KEY, SALT, 210000, 32, 'sha512');
     registry = new AgentRegistry(db, derivedKey);
     userRegistry = new UserRegistry(db, derivedKey);
   });

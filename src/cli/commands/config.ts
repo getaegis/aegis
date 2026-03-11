@@ -58,7 +58,9 @@ export function register(program: Command): void {
         console.log(`    Log level:       ${config.logLevel}`);
         console.log(`    Log format:      ${config.logFormat}`);
         console.log(`    Metrics:         ${config.metricsEnabled ? 'enabled' : 'disabled'}`);
-        console.log(`    Agent auth:      ${config.requireAgentAuth ? 'required' : 'optional'}`);
+        console.log(
+          `    Agent auth:      ${config.requireAgentAuth ? 'required (default)' : 'disabled'}`,
+        );
         console.log(`    TLS:             ${config.tls ? 'enabled' : 'disabled'}`);
         console.log(`    Policy mode:     ${config.policyMode}`);
         if (config.policiesDir) {

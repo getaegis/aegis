@@ -95,12 +95,16 @@ Each phase builds on the last. Checked items are shipped.
 
 ## v0.9 — Production Hardening
 
-- [ ] Comprehensive E2E test suite
-- [ ] Security audit (STRIDE threat model, dependency audit, pen test checklist)
-- [ ] Database hardening (backup/restore, encryption at rest)
-- [ ] Error handling & circuit breakers
-- [ ] Performance benchmarks (p50/p95/p99 latency)
-- [ ] Cross-platform key storage (macOS Keychain, Windows Credential Manager, Linux libsecret)
+- [x] Concurrent credential isolation test
+- [x] Security audit (STRIDE threat model, dependency audit, pen test checklist)
+- [x] Database hardening (backup/restore, encryption at rest)
+- [x] Error handling & circuit breakers
+- [x] Configurable request body size limits and request timeouts
+- [x] Per-agent connection limits
+- [x] Performance benchmarks (p50/p95/p99 latency)
+- [x] Connection pooling with keep-alive
+- [x] Memory profiling for credential leak detection
+- [x] Cross-platform key storage (macOS Keychain, Windows Credential Manager, Linux libsecret)
 
 ---
 
@@ -115,12 +119,16 @@ Each phase builds on the last. Checked items are shipped.
 
 ## Future
 
+- Response scanning and secret redaction
+- Mutual TLS and IP allowlisting for Gate connections
+- Signed policy files (HMAC/GPG verification)
+- Append-only audit logs and remote syslog/SIEM forwarding
+- Persistent rate limiting (Redis-backed)
 - Plugin system (custom auth injection, audit destinations, policy evaluators)
 - OAuth2 token management (automatic refresh)
 - Credential import (Doppler, HashiCorp Vault, AWS Secrets Manager)
 - Framework integrations (LangChain, CrewAI, AutoGen, OpenAI Agents SDK, Vercel AI SDK)
-- Response scanning and secret redaction
 
 ---
 
-*Last updated: 10 March 2026*
+*Last updated: 11 March 2026*

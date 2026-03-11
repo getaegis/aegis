@@ -16,6 +16,8 @@ export { getDb, getVaultSalt, migrate } from './db.js';
 export type { CheckResult, DoctorOptions, DoctorReport } from './doctor.js';
 export { printDoctorReport, runDoctor } from './doctor.js';
 export { Gate } from './gate/index.js';
+export type { KeyStorage, KeyStorageBackend } from './key-storage/index.js';
+export { commandExists, getKeyStorage } from './key-storage/index.js';
 export { Ledger } from './ledger/index.js';
 export type { LoggerOptions, LogLevel } from './logger/index.js';
 export { createLogger, generateRequestId, safeMeta, scrubString } from './logger/index.js';

@@ -1,5 +1,5 @@
 import * as crypto from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type Database from 'better-sqlite3-multiple-ciphers';
 import type { BodyInspectionMode } from '../gate/body-inspector.js';
 import { decrypt, deriveKey, encrypt } from './crypto.js';
 

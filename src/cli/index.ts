@@ -5,9 +5,11 @@
 export { register as registerAgent } from './commands/agent.js';
 export { register as registerConfig } from './commands/config.js';
 export { register as registerDashboard } from './commands/dashboard.js';
+export { register as registerDb } from './commands/db.js';
 export { register as registerDoctor } from './commands/doctor.js';
 export { register as registerGate } from './commands/gate.js';
 export { register as registerInit } from './commands/init.js';
+export { register as registerKey } from './commands/key.js';
 export { register as registerLedger } from './commands/ledger.js';
 export { register as registerMcp } from './commands/mcp.js';
 export { register as registerPolicy } from './commands/policy.js';

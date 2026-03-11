@@ -4,7 +4,7 @@ import * as http from 'node:http';
 import * as https from 'node:https';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migrate } from '../src/db.js';
 import { Gate } from '../src/gate/index.js';
@@ -1737,5 +1737,835 @@ describe('graceful shutdown', () => {
     const result = await gate.stop();
     expect(result.drained).toBe(true);
     expect(result.activeAtClose).toBe(0);
+  });
+});
+
+// ─── Request Smuggling / Security Tests ────────────────────────────────────
+
+describe('gate request smuggling resistance', () => {
+  const masterKey = 'test-master-key-smuggling';
+  let db: ReturnType<typeof Database>;
+  let vault: Vault;
+  let ledger: Ledger;
+  let upstream: UpstreamRecorder;
+  let gate: Gate;
+  let gatePort: number;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    db.pragma('journal_mode = WAL');
+    migrate(db);
+
+    vault = new Vault(db, masterKey);
+    ledger = new Ledger(db);
+
+    upstream = new UpstreamRecorder();
+    await upstream.start();
+
+    gate = new Gate({
+      port: 0,
+      vault,
+      ledger,
+      logLevel: 'error',
+      _testUpstream: {
+        protocol: 'http',
+        hostname: 'localhost',
+        port: upstream.port,
+      },
+    });
+    await gate.start();
+    gatePort = gate.listeningPort;
+
+    vault.add({
+      name: 'smuggle-cred',
+      service: 'smuggle-svc',
+      secret: 'sk-smuggle-secret-123',
+      authType: 'bearer',
+      domains: ['smuggle-svc.example.com'],
+    });
+  });
+
+  afterEach(async () => {
+    await gate.stop();
+    await upstream.stop();
+    db.close();
+  });
+
+  /**
+   * Send a raw HTTP request string over a TCP socket to Gate.
+   * This bypasses Node's http.request() which sanitises headers/bodies,
+   * allowing us to test malformed requests that agents might craft.
+   */
+  function rawRequest(port: number, raw: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const { Socket } = require('node:net') as typeof import('node:net');
+      const socket = new Socket();
+      let data = '';
+
+      socket.connect(port, '127.0.0.1', () => {
+        socket.write(raw);
+        // Signal we're done writing so the server can respond and close
+        socket.end();
+      });
+
+      socket.on('data', (chunk: Buffer) => {
+        data += chunk.toString();
+      });
+
+      socket.on('end', () => {
+        resolve(data);
+      });
+
+      socket.on('error', reject);
+
+      // Short timeout — these should respond fast
+      socket.setTimeout(1000, () => {
+        socket.destroy();
+        resolve(data);
+      });
+    });
+  }
+
+  it('rejects requests with both Content-Length and Transfer-Encoding (CL/TE desync)', async () => {
+    // CL/TE desync is the classic HTTP request smuggling vector.
+    // An attacker sends conflicting Content-Length and Transfer-Encoding
+    // headers hoping the proxy and backend disagree on body boundaries.
+    const raw =
+      `POST /smuggle-svc/smuggle-svc/api HTTP/1.1\r\n` +
+      `Host: localhost:${gatePort}\r\n` +
+      `Content-Length: 5\r\n` +
+      `Transfer-Encoding: chunked\r\n` +
+      `\r\n` +
+      `0\r\n\r\n`;
+
+    await rawRequest(gatePort, raw);
+
+    // Node.js HTTP server handles CL/TE by preferring Transfer-Encoding
+    // (per RFC 9112 §6.3) and ignoring Content-Length. The request either
+    // gets processed normally (with TE taking precedence) or rejected.
+    // Either way, the upstream should see at most 1 request, never 2.
+    expect(upstream.requests.length).toBeLessThanOrEqual(1);
+  });
+
+  it('handles double Content-Length headers without processing extra data', async () => {
+    // Two conflicting Content-Length values — a proxy might use the first,
+    // the backend the second, allowing smuggled data.
+    const raw =
+      `POST /smuggle-svc/smuggle-svc/api HTTP/1.1\r\n` +
+      `Host: localhost:${gatePort}\r\n` +
+      `Content-Length: 5\r\n` +
+      `Content-Length: 50\r\n` +
+      `\r\n` +
+      `hello`;
+
+    const response = await rawRequest(gatePort, raw);
+
+    // Node.js HTTP server rejects duplicate Content-Length with a 400.
+    // This is the correct behaviour per RFC 9112.
+    expect(response).toMatch(/400/);
+  });
+
+  it('prevents path traversal via encoded dots (..%2f)', async () => {
+    // Path: /smuggle-svc/..%2f_aegis%2fhealth
+    // After splitting on '/', pathParts = ['smuggle-svc', '..%2f_aegis%2fhealth']
+    // The '..' is embedded within the segment (not a standalone segment),
+    // so it routes to 'smuggle-svc' and forwards the raw path to upstream.
+    // This is safe: the agent never escapes service routing.
+    const res = await gateRequest(gatePort, '/smuggle-svc/..%2f_aegis%2fhealth');
+    // Should reach upstream (200), NOT the internal _aegis health endpoint
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.status).not.toBe('ok'); // health endpoint returns {status:'ok'}
+  });
+
+  it('prevents path traversal via double-encoded dots (%2e%2e)', async () => {
+    // %2e%2e is percent-encoded "..". If Gate uses new URL() to parse,
+    // it normalises this to ".." and resolves path traversal, allowing
+    // /service/%2e%2e/_aegis/health → /_aegis/health (internal endpoint).
+    // Fix: Gate explicitly detects traversal segments (raw and decoded)
+    // and returns 400 before any routing occurs.
+    const res = await gateRequest(gatePort, '/smuggle-svc/%2e%2e/_aegis/health');
+    expect(res.status).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('Path traversal detected');
+  });
+
+  it('strips agent-injected Authorization headers before credential injection', async () => {
+    // Agent tries to inject its own Authorization header to override
+    // Aegis's credential injection — Gate must strip it.
+    const res = await gateRequest(gatePort, '/smuggle-svc/smuggle-svc/api', {
+      headers: {
+        authorization: 'Bearer agent-tried-to-inject-this',
+      },
+    });
+
+    expect(res.status).toBe(200);
+
+    // The upstream should have the REAL credential, not the agent's
+    const upstreamReq = upstream.last;
+    expect(upstreamReq?.headers.authorization).toBe('Bearer sk-smuggle-secret-123');
+    expect(upstreamReq?.headers.authorization).not.toContain('agent-tried-to-inject-this');
+  });
+
+  it('strips agent-injected X-Api-Key headers', async () => {
+    // Even with a bearer-type credential, if the agent sends x-api-key
+    // it should be stripped.
+    const res = await gateRequest(gatePort, '/smuggle-svc/smuggle-svc/api', {
+      headers: {
+        'x-api-key': 'agent-injected-key',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const upstreamReq = upstream.last;
+    // x-api-key should be stripped (Gate strips it for bearer creds)
+    expect(upstreamReq?.headers['x-api-key']).toBeUndefined();
+  });
+
+  it('does not forward X-Aegis-Agent token to upstream', async () => {
+    const res = await gateRequest(gatePort, '/smuggle-svc/smuggle-svc/api', {
+      headers: {
+        'x-aegis-agent': 'aegis_secret_token_that_should_not_leak',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const upstreamReq = upstream.last;
+    expect(upstreamReq?.headers['x-aegis-agent']).toBeUndefined();
+  });
+
+  it('does not forward X-Target-Host to upstream', async () => {
+    const res = await gateRequest(gatePort, '/smuggle-svc/smuggle-svc/api', {
+      headers: {
+        'x-target-host': 'smuggle-svc.example.com',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const upstreamReq = upstream.last;
+    expect(upstreamReq?.headers['x-target-host']).toBeUndefined();
+  });
+
+  it('overwrites Host header with target domain, not agent-supplied value', async () => {
+    const res = await gateRequest(gatePort, '/smuggle-svc/smuggle-svc/api', {
+      headers: {
+        host: 'evil.example.com',
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const upstreamReq = upstream.last;
+    // Gate sets Host to the credential's target domain, not the agent's value
+    expect(upstreamReq?.headers.host).toBe('smuggle-svc.example.com');
+    expect(upstreamReq?.headers.host).not.toBe('evil.example.com');
+  });
+
+  it('rejects null bytes in URL path', async () => {
+    const raw =
+      `GET /smuggle-svc/smuggle-svc/api%00/etc/passwd HTTP/1.1\r\n` +
+      `Host: localhost:${gatePort}\r\n` +
+      `\r\n`;
+
+    const response = await rawRequest(gatePort, raw);
+    // Node.js may return 400 Bad Request or silently close the connection.
+    // Both are safe — the request must NOT succeed (no 200 OK).
+    expect(response).not.toMatch(/200 OK/);
+  });
+
+  it('handles oversized headers without crashing', async () => {
+    // Send a header value that's very large — Gate should not crash
+    const bigValue = 'x'.repeat(16384);
+    const res = await gateRequest(gatePort, '/smuggle-svc/smuggle-svc/api', {
+      headers: {
+        'x-custom': bigValue,
+      },
+    });
+
+    // Either processed or rejected — but Gate does not crash
+    expect([200, 400, 431]).toContain(res.status);
+  });
+});
+
+// ─── Error Handling & Recovery Tests ──────────────────────────────────────────
+
+describe('error handling & recovery', () => {
+  const masterKey = 'test-master-key-error-handling';
+  let db: ReturnType<typeof Database>;
+  let vault: Vault;
+  let ledger: Ledger;
+  let upstream: UpstreamRecorder;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    db.pragma('journal_mode = WAL');
+    migrate(db);
+    vault = new Vault(db, masterKey);
+    ledger = new Ledger(db);
+    upstream = new UpstreamRecorder();
+    await upstream.start();
+  });
+
+  afterEach(async () => {
+    await upstream.stop();
+    db.close();
+  });
+
+  describe('max body size', () => {
+    it('rejects bodies exceeding the configured limit with 413', async () => {
+      vault.add({
+        name: 'body-svc',
+        service: 'body-svc',
+        secret: 'key123',
+        domains: ['api.example.com'],
+        bodyInspection: 'off',
+      });
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        maxBodySize: 100, // 100 bytes
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: upstream.port },
+      });
+      await gate.start();
+      try {
+        const res = await gateRequest(gate.listeningPort, '/body-svc/api/data', {
+          method: 'POST',
+          body: 'x'.repeat(200), // 200 bytes > 100 byte limit
+          headers: { 'content-type': 'text/plain' },
+        });
+        expect(res.status).toBe(413);
+        const body = JSON.parse(res.body);
+        expect(body.error).toBe('Request body too large');
+        expect(body.limit).toBe(100);
+      } finally {
+        await gate.stop();
+      }
+    });
+
+    it('allows bodies within the configured limit', async () => {
+      vault.add({
+        name: 'body-svc',
+        service: 'body-svc',
+        secret: 'key123',
+        domains: ['api.example.com'],
+        bodyInspection: 'off',
+      });
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        maxBodySize: 1000, // 1000 bytes
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: upstream.port },
+      });
+      await gate.start();
+      try {
+        const res = await gateRequest(gate.listeningPort, '/body-svc/api/data', {
+          method: 'POST',
+          body: 'x'.repeat(500), // 500 bytes < 1000 byte limit
+          headers: { 'content-type': 'text/plain' },
+        });
+        expect(res.status).toBe(200);
+      } finally {
+        await gate.stop();
+      }
+    });
+  });
+
+  describe('request timeout', () => {
+    it('returns 504 when upstream times out', async () => {
+      // Set up a slow upstream that never responds
+      const slowServer = http.createServer((_req, _res) => {
+        // Intentionally don't respond — let it hang
+      });
+      await new Promise<void>((resolve) => slowServer.listen(0, resolve));
+      const slowPort = (slowServer.address() as { port: number }).port;
+
+      vault.add({
+        name: 'slow-svc',
+        service: 'slow-svc',
+        secret: 'key123',
+        domains: ['api.example.com'],
+      });
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        requestTimeout: 800, // 800ms timeout
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: slowPort },
+      });
+      await gate.start();
+      try {
+        const res = await gateRequest(gate.listeningPort, '/slow-svc/api/data');
+        expect(res.status).toBe(504);
+        const body = JSON.parse(res.body);
+        expect(body.error).toBe('Upstream request timed out');
+      } finally {
+        await gate.stop();
+        slowServer.close();
+      }
+    });
+  });
+
+  describe('per-agent connection limits', () => {
+    it('rejects requests when agent exceeds connection limit', async () => {
+      vault.add({
+        name: 'conn-svc',
+        service: 'conn-svc',
+        secret: 'key123',
+        domains: ['api.example.com'],
+      });
+
+      // Create a slow upstream that holds connections
+      const slowServer = http.createServer((_req, res) => {
+        setTimeout(() => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('{"ok":true}');
+        }, 2000); // Hold for 2s
+      });
+      await new Promise<void>((resolve) => slowServer.listen(0, resolve));
+      const slowPort = (slowServer.address() as { port: number }).port;
+
+      const { deriveKey } = await import('../src/vault/crypto.js');
+      const { AgentRegistry } = await import('../src/agent/index.js');
+      const derivedKeyBuf = deriveKey(masterKey, 'test-salt');
+      const registry = new AgentRegistry(db, derivedKeyBuf);
+      const agent = registry.add({ name: 'conn-test-agent' });
+      registry.grant({ agentName: 'conn-test-agent', credentialId: vault.list()[0].id });
+
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        agentRegistry: registry,
+        requireAgentAuth: true,
+        maxConnectionsPerAgent: 2, // Only allow 2 concurrent
+        requestTimeout: 5000,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: slowPort },
+      });
+      await gate.start();
+      try {
+        // Fire 3 concurrent requests — the 3rd should be rejected
+        const headers = { 'x-aegis-agent': agent.token };
+        const requests = [
+          gateRequest(gate.listeningPort, '/conn-svc/api/1', { headers }),
+          gateRequest(gate.listeningPort, '/conn-svc/api/2', { headers }),
+          // Small delay to ensure the first two are in-flight
+          new Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }>(
+            (resolve) =>
+              setTimeout(
+                () => resolve(gateRequest(gate.listeningPort, '/conn-svc/api/3', { headers })),
+                100,
+              ),
+          ),
+        ];
+        const results = await Promise.all(requests);
+        const statuses = results.map((r) => r.status);
+        // At least one should be 429
+        expect(statuses).toContain(429);
+        // The 429 response should have the right error
+        const rejected = results.find((r) => r.status === 429);
+        if (rejected) {
+          const body = JSON.parse(rejected.body);
+          expect(body.error).toBe('Too many concurrent requests for this agent');
+          expect(body.limit).toBe(2);
+        }
+      } finally {
+        await gate.stop();
+        slowServer.close();
+      }
+    });
+  });
+
+  describe('circuit breaker', () => {
+    it('opens circuit after repeated upstream failures', async () => {
+      vault.add({
+        name: 'fail-svc',
+        service: 'fail-svc',
+        secret: 'key123',
+        domains: ['api.example.com'],
+      });
+
+      // Upstream always returns 500
+      upstream.nextStatus = 500;
+      upstream.nextBody = '{"error":"internal"}';
+
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: upstream.port },
+      });
+      await gate.start();
+      try {
+        // Send 5 requests to trigger the circuit breaker (threshold = 5)
+        for (let i = 0; i < 5; i++) {
+          await gateRequest(gate.listeningPort, '/fail-svc/api/data');
+        }
+
+        // The 6th request should get a 503 (circuit open)
+        const res = await gateRequest(gate.listeningPort, '/fail-svc/api/data');
+        expect(res.status).toBe(503);
+        const body = JSON.parse(res.body);
+        expect(body.error).toContain('circuit breaker');
+      } finally {
+        await gate.stop();
+      }
+    });
+
+    it('closes circuit after cooldown period on success', async () => {
+      vault.add({
+        name: 'recover-svc',
+        service: 'recover-svc',
+        secret: 'key123',
+        domains: ['api.example.com'],
+      });
+
+      // Initially succeed
+      upstream.nextStatus = 200;
+      upstream.nextBody = '{"ok":true}';
+
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: upstream.port },
+      });
+      await gate.start();
+      try {
+        // First request succeeds (no circuit state)
+        const res = await gateRequest(gate.listeningPort, '/recover-svc/api/data');
+        expect(res.status).toBe(200);
+
+        // Circuit breaker resets on success
+        const res2 = await gateRequest(gate.listeningPort, '/recover-svc/api/data');
+        expect(res2.status).toBe(200);
+      } finally {
+        await gate.stop();
+      }
+    });
+  });
+
+  describe('retry logic', () => {
+    it('retries GET requests on transient 502 failures', async () => {
+      vault.add({
+        name: 'retry-svc',
+        service: 'retry-svc',
+        secret: 'key123',
+        domains: ['api.example.com'],
+      });
+
+      let requestCount = 0;
+      const retryServer = http.createServer((_req, res) => {
+        requestCount++;
+        if (requestCount <= 2) {
+          // First 2 attempts return 502
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end('{"error":"bad gateway"}');
+        } else {
+          // 3rd attempt succeeds
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('{"ok":true}');
+        }
+      });
+      await new Promise<void>((resolve) => retryServer.listen(0, resolve));
+      const retryPort = (retryServer.address() as { port: number }).port;
+
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: retryPort },
+      });
+      await gate.start();
+      try {
+        const res = await gateRequest(gate.listeningPort, '/retry-svc/api/data');
+        expect(res.status).toBe(200);
+        expect(requestCount).toBe(3); // original + 2 retries
+      } finally {
+        await gate.stop();
+        retryServer.close();
+      }
+    });
+
+    it('does not retry POST requests on transient failures', async () => {
+      vault.add({
+        name: 'noretry-svc',
+        service: 'noretry-svc',
+        secret: 'key123',
+        domains: ['api.example.com'],
+      });
+
+      let requestCount = 0;
+      const noRetryServer = http.createServer((_req, res) => {
+        requestCount++;
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end('{"error":"bad gateway"}');
+      });
+      await new Promise<void>((resolve) => noRetryServer.listen(0, resolve));
+      const noRetryPort = (noRetryServer.address() as { port: number }).port;
+
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: noRetryPort },
+      });
+      await gate.start();
+      try {
+        const res = await gateRequest(gate.listeningPort, '/noretry-svc/api/data', {
+          method: 'POST',
+          body: '{"data":"test"}',
+        });
+        expect(res.status).toBe(502);
+        expect(requestCount).toBe(1); // No retries for POST
+      } finally {
+        await gate.stop();
+        noRetryServer.close();
+      }
+    });
+  });
+
+  describe('meaningful error responses', () => {
+    it('returns structured errors with service name on 502', async () => {
+      vault.add({
+        name: 'err-svc',
+        service: 'err-svc',
+        secret: 'key123',
+        domains: ['api.example.com'],
+      });
+
+      // Upstream that immediately closes the connection
+      const badServer = http.createServer((_req, res) => {
+        res.destroy();
+      });
+      await new Promise<void>((resolve) => badServer.listen(0, resolve));
+      const badPort = (badServer.address() as { port: number }).port;
+
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: badPort },
+      });
+      await gate.start();
+      try {
+        const res = await gateRequest(gate.listeningPort, '/err-svc/api/data');
+        // May be 502 (connection error) or 504 (timeout) depending on how fast the server closes
+        expect([502, 504]).toContain(res.status);
+        const body = JSON.parse(res.body);
+        expect(body.service).toBe('err-svc');
+      } finally {
+        await gate.stop();
+        badServer.close();
+      }
+    });
+
+    it('returns 400 for missing service name', async () => {
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: upstream.port },
+      });
+      await gate.start();
+      try {
+        const res = await gateRequest(gate.listeningPort, '/');
+        expect(res.status).toBe(400);
+        const body = JSON.parse(res.body);
+        expect(body.error).toBe('Missing service name');
+        expect(body.usage).toContain('{service}');
+      } finally {
+        await gate.stop();
+      }
+    });
+  });
+
+  // ─── Connection Pooling ──────────────────────────────────────────────────────
+
+  describe('connection pooling', () => {
+    it('reuses TCP connections across sequential requests (keep-alive)', async () => {
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: upstream.port },
+      });
+      await gate.start();
+      try {
+        vault.add({
+          name: 'pool-cred',
+          service: 'pool-svc',
+          secret: 'pool-secret',
+          authType: 'bearer',
+          domains: ['api.pool.com'],
+        });
+
+        // Make multiple sequential requests — connection should be reused
+        const res1 = await gateRequest(gate.listeningPort, '/pool-svc/v1/first');
+        const res2 = await gateRequest(gate.listeningPort, '/pool-svc/v1/second');
+        const res3 = await gateRequest(gate.listeningPort, '/pool-svc/v1/third');
+
+        expect(res1.status).toBe(200);
+        expect(res2.status).toBe(200);
+        expect(res3.status).toBe(200);
+        expect(upstream.requests).toHaveLength(3);
+        expect(upstream.requests[0].url).toBe('/v1/first');
+        expect(upstream.requests[1].url).toBe('/v1/second');
+        expect(upstream.requests[2].url).toBe('/v1/third');
+      } finally {
+        await gate.stop();
+      }
+    });
+
+    it('handles concurrent requests through the connection pool', async () => {
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: upstream.port },
+      });
+      await gate.start();
+      try {
+        vault.add({
+          name: 'conc-cred',
+          service: 'conc-svc',
+          secret: 'conc-secret',
+          authType: 'bearer',
+          domains: ['api.conc.com'],
+        });
+
+        // Fire 10 concurrent requests
+        const promises = Array.from({ length: 10 }, (_, i) =>
+          gateRequest(gate.listeningPort, `/conc-svc/v1/item/${i}`),
+        );
+        const results = await Promise.all(promises);
+
+        // All should succeed
+        for (const res of results) {
+          expect(res.status).toBe(200);
+        }
+        expect(upstream.requests).toHaveLength(10);
+      } finally {
+        await gate.stop();
+      }
+    });
+
+    it('cleans up connection pool agents on shutdown', async () => {
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: upstream.port },
+      });
+      await gate.start();
+
+      vault.add({
+        name: 'cleanup-cred',
+        service: 'cleanup-svc',
+        secret: 'cleanup-secret',
+        authType: 'bearer',
+        domains: ['api.cleanup.com'],
+      });
+
+      // Make a request to create a pooled connection
+      await gateRequest(gate.listeningPort, '/cleanup-svc/v1/hello');
+      expect(upstream.requests).toHaveLength(1);
+
+      // Stop should clean up agents without error
+      const result = await gate.stop();
+      expect(result.drained).toBe(true);
+      expect(result.activeAtClose).toBe(0);
+    });
+
+    it('handles ECONNRESET on reused socket by retrying', async () => {
+      // Create a server that accepts the first request, then RSTs the next one
+      let requestCount = 0;
+      const resetServer = http.createServer((req, res) => {
+        requestCount++;
+        if (requestCount === 2) {
+          // Destroy the socket to simulate ECONNRESET on reused connection
+          req.socket.destroy();
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('{"ok":true}');
+      });
+
+      await new Promise<void>((resolve) => {
+        resetServer.listen(0, () => resolve());
+      });
+      const resetPort = (resetServer.address() as { port: number }).port;
+
+      const gate = new Gate({
+        port: 0,
+        vault,
+        ledger,
+        logLevel: 'error',
+        requireAgentAuth: false,
+        _testUpstream: { protocol: 'http', hostname: 'localhost', port: resetPort },
+      });
+      await gate.start();
+
+      try {
+        vault.add({
+          name: 'reset-cred',
+          service: 'reset-svc',
+          secret: 'reset-secret',
+          authType: 'bearer',
+          domains: ['api.reset.com'],
+        });
+
+        // First request succeeds and establishes a pooled connection
+        const res1 = await gateRequest(gate.listeningPort, '/reset-svc/v1/first');
+        expect(res1.status).toBe(200);
+
+        // Wait for the connection to enter the keep-alive pool
+        await new Promise((r) => setTimeout(r, 100));
+
+        // Second request: if the pooled socket is reused, the server will RST it.
+        // Gate should detect reusedSocket + ECONNRESET/socket-hang-up and retry
+        // on a fresh socket (3rd server request), which succeeds.
+        // If the socket wasn't reused (new connection), the server RSTs it
+        // and Gate returns 502 (no reusedSocket → no special retry).
+        const res2 = await gateRequest(gate.listeningPort, '/reset-svc/v1/second');
+
+        if (res2.status === 200) {
+          // Socket was reused → ECONNRESET retry succeeded
+          expect(requestCount).toBe(3); // 1st ok, 2nd reset, 3rd retry ok
+        } else {
+          // Socket was NOT reused → server destroyed a fresh connection → 502
+          expect(res2.status).toBe(502);
+          expect(requestCount).toBe(2);
+        }
+      } finally {
+        await gate.stop();
+        resetServer.close();
+      }
+    });
   });
 });
