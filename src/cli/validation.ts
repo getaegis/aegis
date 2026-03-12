@@ -95,8 +95,8 @@ export function validateDomains(raw: string): string[] {
     process.exit(1);
   }
   for (const domain of domains) {
-    // Allow wildcards like *.slack.com — basic sanity check
-    if (!/^[a-zA-Z0-9.*_-]+(\.[a-zA-Z0-9.*_-]+)*$/.test(domain)) {
+    // Allow wildcards like *.slack.com and host:port like localhost:9999
+    if (!/^[a-zA-Z0-9.*_-]+(\.[a-zA-Z0-9.*_-]+)*(:\d{1,5})?$/.test(domain)) {
       console.error(
         `\n✗ Invalid domain: "${domain}"\n  Domains must be valid hostnames (e.g. api.slack.com, *.example.com)\n`,
       );

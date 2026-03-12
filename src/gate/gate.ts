@@ -496,6 +496,16 @@ export class Gate {
         return;
       }
 
+      // Null byte injection guard: %00 in URLs can truncate paths in downstream
+      // systems (C-based HTTP servers, CGI handlers) causing path interpretation
+      // mismatches. Block any request containing null bytes in the raw path.
+      if (rawPath.includes('%00') || rawPath.includes('\0')) {
+        reqLog.warn({ path: rawPath }, 'Blocked: null byte in path');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(`${JSON.stringify({ error: 'Null byte in path' })}\n`);
+        return;
+      }
+
       // Health check
       if (pathParts[0] === '_aegis' && pathParts[1] === 'health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1135,7 +1145,8 @@ export class Gate {
       for (const [key, value] of Object.entries(req.headers)) {
         const lower = key.toLowerCase();
         // Strip auth headers the agent might have tried to include
-        if (lower === 'authorization' || lower === 'x-api-key') continue;
+        if (lower === 'authorization' || lower === 'x-api-key' || lower === 'proxy-authorization')
+          continue;
         // Don't forward host, target-host override, or agent token
         if (lower === 'host' || lower === 'x-target-host' || lower === 'x-aegis-agent') continue;
         outboundHeaders[key] = value;

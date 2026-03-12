@@ -121,6 +121,17 @@ export class Vault {
       );
     }
 
+    // Check for duplicate service name
+    const existingService = this.db
+      .prepare('SELECT name FROM credentials WHERE service = ?')
+      .get(params.service) as { name: string } | undefined;
+    if (existingService) {
+      throw new Error(
+        `Service "${params.service}" is already used by credential "${existingService.name}". ` +
+          `Use a different service name (e.g. ${params.service}-staging, ${params.service}-prod).`,
+      );
+    }
+
     const id = crypto.randomUUID();
     const { encrypted, iv, authTag } = encrypt(params.secret, this.derivedKey);
 
@@ -377,18 +388,27 @@ export class Vault {
   /**
    * Check if a hostname matches any of the allowed domain patterns.
    * Supports wildcards: *.slack.com matches api.slack.com
+   * Port-aware: if the stored domain includes a port (e.g. localhost:9999),
+   * only that exact host:port matches. If no port is stored (e.g. api.stripe.com),
+   * any port on that host matches.
    */
   domainMatches(hostname: string, allowedDomains: string[]): boolean {
     for (const pattern of allowedDomains) {
-      if (pattern === hostname) return true;
+      if (pattern.includes(':')) {
+        // Stored domain has a port — require exact host:port match
+        if (pattern === hostname) return true;
+      } else {
+        // Stored domain is bare hostname — strip port from request before comparing
+        const host = hostname.includes(':') ? hostname.split(':')[0] : hostname;
+        if (pattern === host) return true;
 
-      // Wildcard: *.example.com matches sub.example.com (single level only)
-      if (pattern.startsWith('*.')) {
-        const suffix = pattern.slice(1); // .example.com
-        if (hostname.endsWith(suffix)) {
-          const prefix = hostname.slice(0, -suffix.length);
-          // Only match single-level: "api" is OK, "deep.api" is not
-          if (prefix.length > 0 && !prefix.includes('.')) return true;
+        // Wildcard: *.example.com matches sub.example.com (single level only)
+        if (pattern.startsWith('*.')) {
+          const suffix = pattern.slice(1); // .example.com
+          if (host.endsWith(suffix)) {
+            const prefix = host.slice(0, -suffix.length);
+            if (prefix.length > 0 && !prefix.includes('.')) return true;
+          }
         }
       }
     }

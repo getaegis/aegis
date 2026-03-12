@@ -134,7 +134,7 @@ const MIGRATIONS: Migration[] = [
     CREATE TABLE IF NOT EXISTS credentials (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL UNIQUE,
-      service     TEXT NOT NULL,
+      service     TEXT NOT NULL UNIQUE,
       encrypted   BLOB NOT NULL,
       iv          BLOB NOT NULL,
       auth_tag    BLOB NOT NULL,

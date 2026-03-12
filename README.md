@@ -64,11 +64,17 @@ aegis init --write-secrets
 aegis key where
 ```
 
-If you use `--env-file` or need to set the key manually:
+**Master key resolution order** (highest priority wins):
 
-```bash
-export AEGIS_MASTER_KEY=<key from init>
-```
+| Priority | Source | Set by |
+|----------|--------|--------|
+| 1 | `AEGIS_MASTER_KEY` environment variable | `export` in shell |
+| 2 | `.env` file | `aegis init --env-file` |
+| 3 | `aegis.config.yaml` (`vault.master_key`) | `aegis init --write-secrets` |
+| 4 | OS keychain (macOS/Windows/Linux) | `aegis init` (default) |
+| 5 | File fallback (`.aegis/.master-key`) | Auto when no keychain available |
+
+Run `aegis key where` to see which source is active.
 
 ```bash
 # Add a credential
@@ -293,12 +299,22 @@ aegis config show
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `AEGIS_MASTER_KEY` | Master encryption key (from `aegis init`) |
-| `AEGIS_SALT` | Vault encryption salt (auto-generated, stored in `.aegis/vaults.json`) |
-| `AEGIS_VAULT` | Active vault name (default: `default`) |
-| `AEGIS_USER_TOKEN` | RBAC user token for CLI authentication |
+All environment variables override config file settings. CLI flags override both.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AEGIS_MASTER_KEY` | *(none)* | Master encryption key (from `aegis init`) |
+| `AEGIS_SALT` | *(none)* | Vault encryption salt (auto-generated, stored in `.aegis/vaults.json`) |
+| `AEGIS_VAULT` | `default` | Active vault name |
+| `AEGIS_PORT` | `3100` | Gate proxy listen port |
+| `AEGIS_DATA_DIR` | `./.aegis` | Directory for vault databases and registry |
+| `AEGIS_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `AEGIS_LOG_FORMAT` | `json` | Log output format: `json` or `pretty` |
+| `AEGIS_REQUIRE_AGENT_AUTH` | `true` | Require `X-Aegis-Agent` header on every request (`true`/`false`) |
+| `AEGIS_POLICY_MODE` | `enforce` | Policy enforcement: `enforce`, `dry-run`, or `off` |
+| `AEGIS_POLICIES_DIR` | *(none)* | Directory containing YAML policy files |
+| `AEGIS_METRICS` | `true` | Enable Prometheus metrics endpoint (`true`/`false`) |
+| `AEGIS_USER_TOKEN` | *(none)* | RBAC user token for CLI authentication |
 
 ## Webhooks
 

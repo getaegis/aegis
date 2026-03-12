@@ -3,7 +3,7 @@
 A complete technical reference explaining how Aegis protects credentials, where data flows, what decisions were made, and why. Written so that you can audit every trust boundary yourself.
 
 **Last updated:** 11 March 2026
-**Version:** 0.9.1
+**Version:** 0.9.2
 
 ---
 
@@ -417,7 +417,13 @@ graph TD
 ```
 MASTER KEY (64 hex chars = 256 bits of entropy)
      │
-     │  Loaded from: env var → config YAML → OS keychain → empty
+     │  Resolution chain (highest priority wins):
+     │    1. AEGIS_MASTER_KEY env var
+     │    2. .env file (AEGIS_MASTER_KEY)
+     │    3. aegis.config.yaml (vault.master_key)
+     │    4. OS keychain (macOS/Windows/Linux)
+     │    5. File fallback (.aegis/.master-key)
+     │
      │  Example: a3f8c1d9e0b7...64 hex characters
      │
      ▼
@@ -425,7 +431,7 @@ MASTER KEY (64 hex chars = 256 bits of entropy)
  │         PBKDF2               │
  │                              │
  │  Algorithm:    SHA-512       │
- │  Iterations:   210,000      │
+ │  Iterations:   210,000       │
  │  Salt:         random        │
  │                (32 bytes,    │
  │                 generated    │

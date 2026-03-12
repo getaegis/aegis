@@ -9,7 +9,13 @@ export type {
   VaultConfig,
   WebhookConfigEntry,
 } from './config.js';
-export { findConfigFile, getConfig, parseConfigFile, validateConfigFile } from './config.js';
+export {
+  findConfigFile,
+  getConfig,
+  loadEnv,
+  parseConfigFile,
+  validateConfigFile,
+} from './config.js';
 export type { DashboardServerOptions } from './dashboard/index.js';
 export { DashboardServer } from './dashboard/index.js';
 export { getDb, getVaultSalt, migrate } from './db.js';

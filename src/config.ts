@@ -383,7 +383,7 @@ export function validateConfigFile(config: AegisConfigFile): ConfigValidationErr
 
 // ─── Config Resolution ────────────────────────────────────────────
 
-function loadEnv(filePath: string): Record<string, string> {
+export function loadEnv(filePath: string): Record<string, string> {
   const env: Record<string, string> = {};
   if (!fs.existsSync(filePath)) return env;
   const content = fs.readFileSync(filePath, 'utf-8');
@@ -436,7 +436,7 @@ export function getConfig(): AegisConfig {
     fs.mkdirSync(dataDir, { recursive: true });
   }
 
-  // Master key resolution: env → config file → OS keychain → unseal key file → empty
+  // Master key resolution: env var / .env file → config YAML → OS keychain / file fallback → empty
   let masterKey = getEnv('AEGIS_MASTER_KEY') ?? fileConfig.vault?.master_key ?? '';
   if (!masterKey) {
     try {
