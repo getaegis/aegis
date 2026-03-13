@@ -62,6 +62,19 @@ export function getDb(config: AegisConfig): Database.Database {
   } catch (err: unknown) {
     const sqliteErr = err as { code?: string; message?: string };
     if (sqliteErr.code === 'SQLITE_NOTADB') {
+      if (config.masterKey) {
+        // Encrypted databases return SQLITE_NOTADB for both wrong-key and genuine
+        // corruption — we can't distinguish them, so surface both possibilities.
+        throw new Error(
+          `Cannot open database: ${dbPath}\n\n` +
+            `  Possible causes:\n` +
+            `  1. Master key mismatch — the key doesn't match the one used to create this vault.\n` +
+            `     Run: aegis key where   — to check which source is providing the master key.\n` +
+            `     If .env has AEGIS_MASTER_KEY, it overrides the OS keychain value.\n` +
+            `  2. Database corruption — the file may be damaged (disk error, incomplete write).\n` +
+            `     Back up the file and reinitialize with: aegis init`,
+        );
+      }
       throw new Error(
         `Database file is corrupted or not a valid SQLite database: ${dbPath}\n` +
           `  Back up the file and reinitialize with: aegis init`,
