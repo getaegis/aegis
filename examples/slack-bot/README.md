@@ -72,7 +72,7 @@ aegis gate --policies-dir ./policies --policy-mode enforce
 
 ### 5. Make API calls through Aegis
 
-Your agent now makes requests to `localhost:3100/slack/...` instead of calling Slack directly:
+Your agent now makes requests to `localhost:3100/slack/...` instead of calling Slack directly. The `X-Target-Host` header tells Gate which upstream server to forward to (it's checked against the credential's domain allowlist). Since this credential has only one domain, the header is optional — but shown here for clarity:
 
 ```bash
 # List channels (through Aegis)

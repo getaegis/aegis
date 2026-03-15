@@ -70,7 +70,7 @@ aegis gate --policies-dir ./policies --policy-mode enforce
 
 ### 5. Make API calls through Aegis
 
-Your agent calls `localhost:3100/github/...` instead of `api.github.com` directly:
+Your agent calls `localhost:3100/github/...` instead of `api.github.com` directly. The `X-Target-Host` header tells Gate which upstream server to forward to (it's checked against the credential's domain allowlist). Since this credential has only one domain, the header is optional — but shown here for clarity:
 
 ```bash
 # List your repos

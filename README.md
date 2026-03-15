@@ -72,6 +72,7 @@ aegis vault add \
 aegis gate --no-agent-auth
 
 # Test it — Aegis injects the token, forwards to Slack, logs the request
+# X-Target-Host tells Gate which upstream server to forward to (optional if credential has one domain)
 curl http://localhost:3100/slack/api/auth.test \
   -H "X-Target-Host: api.slack.com"
 ```

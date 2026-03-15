@@ -58,6 +58,14 @@ Aegis is a local proxy (localhost). Added latency is sub-millisecond for credent
 
 ---
 
+### What is the X-Target-Host header?
+
+`X-Target-Host` tells Gate which upstream API server to forward the request to. Gate checks this hostname against the credential's domain allowlist before forwarding — if it doesn't match, the request is blocked.
+
+If your credential has only one domain (e.g. `--domains api.slack.com`), Gate uses it automatically and the header is optional. If your credential has multiple allowed domains, include the header to specify which one. See [Request Routing](USAGE.md#request-routing) for details.
+
+---
+
 ### Can teams use it or is it only local?
 
 Both. Solo use works out of the box. Teams get agent auth tokens, credential grants, RBAC users, and YAML policy files (version-controllable, reviewable). A paid team tier with shared vaults is on the roadmap.

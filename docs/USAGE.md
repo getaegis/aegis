@@ -7,6 +7,7 @@ Complete reference for all Aegis features, configuration, and CLI commands. For 
 ## Table of Contents
 
 - [Master Key Storage](#master-key-storage)
+- [Request Routing](#request-routing)
 - [Agent Identity & Scoping](#agent-identity--scoping)
 - [Policy Engine](#policy-engine)
 - [Credential Options](#credential-options)
@@ -55,6 +56,47 @@ aegis key where
 | 5 | File fallback (`.aegis/.master-key`) | Auto when no keychain available |
 
 Run `aegis key where` to see which source is active.
+
+---
+
+## Request Routing
+
+When an agent makes a request through Gate, the URL path determines which credential to use:
+
+```
+http://localhost:3100/{service}/{path}
+                      ↑          ↑
+                      │          └── forwarded to the upstream API
+                      └── matches a credential's --service name
+```
+
+### X-Target-Host header
+
+The `X-Target-Host` header tells Gate which upstream server to forward the request to. Gate checks this hostname against the credential's domain allowlist (the domain guard) before forwarding.
+
+```bash
+curl http://localhost:3100/slack/api/auth.test \
+  -H "X-Target-Host: api.slack.com"
+```
+
+**When is it optional?** If the credential has only one domain in its allowlist, Gate automatically uses that domain as the target. You can omit `X-Target-Host` in this case:
+
+```bash
+# Credential was added with: --domains api.slack.com
+# Gate knows where to send it — X-Target-Host is optional
+curl http://localhost:3100/slack/api/auth.test
+```
+
+**When is it required?** If the credential has multiple domains (e.g. `--domains api.slack.com,hooks.slack.com`), you must specify which one to target:
+
+```bash
+curl http://localhost:3100/slack/api/auth.test \
+  -H "X-Target-Host: hooks.slack.com"
+```
+
+If `X-Target-Host` doesn't match any domain in the credential's allowlist, the request is blocked and logged.
+
+> **Note:** Gate strips the `X-Target-Host` header before forwarding — the upstream API never sees it.
 
 ---
 

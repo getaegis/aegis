@@ -3,10 +3,12 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Command } from 'commander';
 import { AgentRegistry } from '../../agent/index.js';
-import { getConfig } from '../../config.js';
+import { findConfigFile, getConfig } from '../../config.js';
 import { getDb, getVaultSalt, migrate } from '../../db.js';
 import { Ledger } from '../../ledger/index.js';
 import { AegisMcpServer } from '../../mcp/index.js';
@@ -141,23 +143,49 @@ export function register(program: Command): void {
       const transport = opts.transport;
       const port = opts.port;
 
-      // Resolve the aegis CLI path.
-      // Prefer the built dist/cli.js with an absolute node path — this is stable
-      // across shell sessions (unlike `which aegis` which may resolve to an
-      // ephemeral fnm/nvm multishell path that disappears when the terminal closes).
+      // Resolve the aegis CLI path relative to this module's own location
+      // (not CWD). This module lives at src/cli/commands/mcp.ts and compiles
+      // to dist/cli/commands/mcp.js — package root is three levels up.
+      const currentFile = fileURLToPath(import.meta.url);
+      const packageRoot = path.resolve(path.dirname(currentFile), '..', '..', '..');
+
       let aegisCmd: string;
       let aegisBaseArgs: string[];
 
-      const distCli = path.resolve('dist/cli.js');
+      const distCli = path.join(packageRoot, 'dist', 'cli.js');
+      const srcCli = path.join(packageRoot, 'src', 'cli.ts');
+
       if (fs.existsSync(distCli)) {
         // Use node + absolute path to the built CLI (always stable)
-        aegisCmd = process.execPath; // absolute path to the current node binary
+        aegisCmd = process.execPath;
         aegisBaseArgs = [distCli];
-      } else {
+      } else if (fs.existsSync(srcCli)) {
         // Development fallback: use tsx
-        const cliPath = path.resolve('src/cli.ts');
         aegisCmd = 'npx';
-        aegisBaseArgs = ['tsx', cliPath];
+        aegisBaseArgs = ['tsx', srcCli];
+      } else {
+        // Last resort: reuse however we were invoked
+        aegisCmd = process.execPath;
+        aegisBaseArgs = [path.resolve(process.argv[1])];
+      }
+
+      // Build environment block for stdio configs.
+      // MCP hosts (Claude Desktop, Cursor) don't inherit the user's shell
+      // environment, so we must pass variables the Aegis process needs.
+      const stdioEnv: Record<string, string> = {
+        HOME: os.homedir(),
+        PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+      };
+
+      // Capture data directory so the MCP server finds the right vault
+      // even when spawned from an unpredictable CWD.
+      const cfgFile = findConfigFile();
+      const baseDir = cfgFile ? path.dirname(path.resolve(cfgFile)) : process.cwd();
+      stdioEnv.AEGIS_DATA_DIR = path.resolve(baseDir, '.aegis');
+
+      // Forward master key if set in the current environment
+      if (process.env.AEGIS_MASTER_KEY) {
+        stdioEnv.AEGIS_MASTER_KEY = process.env.AEGIS_MASTER_KEY;
       }
 
       const buildArgs = (): string[] => {
@@ -192,6 +220,7 @@ export function register(program: Command): void {
                 aegis: {
                   command: aegisCmd,
                   args,
+                  env: stdioEnv,
                 },
               },
             };
@@ -219,6 +248,7 @@ export function register(program: Command): void {
                 aegis: {
                   command: aegisCmd,
                   args,
+                  env: stdioEnv,
                 },
               },
             };
@@ -248,6 +278,7 @@ export function register(program: Command): void {
                   type: 'stdio',
                   command: aegisCmd,
                   args,
+                  env: stdioEnv,
                 },
               },
             };
