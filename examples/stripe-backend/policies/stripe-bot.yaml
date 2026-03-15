@@ -1,0 +1,22 @@
+# Policy: stripe-reader agent — read-only access to Stripe API
+#
+# This agent can list and retrieve Stripe resources but cannot
+# create charges, modify customers, or delete anything.
+# Ideal for AI agents that need to answer questions about
+# billing, subscriptions, or payment history.
+
+agent: stripe-reader
+rules:
+  - service: stripe
+    methods: [GET]
+    paths:
+      - /v1/charges.*
+      - /v1/customers.*
+      - /v1/invoices.*
+      - /v1/balance.*
+      - /v1/products.*
+      - /v1/prices.*
+      - /v1/subscriptions.*
+      - /v1/payment_intents.*
+      - /v1/events.*
+    rate_limit: 80/min

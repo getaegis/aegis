@@ -1,0 +1,119 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out the information below to help us investigate.
+
+  - type: input
+    id: version
+    attributes:
+      label: Aegis Version
+      description: "Run `aegis --version` to find this"
+      placeholder: "e.g. 1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation Method
+      options:
+        - npm (global)
+        - npx
+        - Homebrew
+        - Docker
+        - Built from source
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS
+        - Linux (Ubuntu/Debian)
+        - Linux (Fedora/RHEL)
+        - Linux (Arch)
+        - Linux (Other)
+        - Windows
+        - Docker container
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js Version
+      description: "Run `node -v` to find this"
+      placeholder: "e.g. v24.14.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug
+      placeholder: "Describe what happened and what you expected to happen instead"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the behavior
+      placeholder: |
+        1. Run `aegis vault add --name test --service test --secret "xxx" --domains api.example.com`
+        2. Run `aegis gate`
+        3. Run `curl http://localhost:3100/test/endpoint -H "X-Target-Host: api.example.com"`
+        4. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Log Output
+      description: "Paste any relevant terminal output or log messages. **Make sure to redact any API keys or secrets.**"
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: "Paste your `aegis.config.yaml` if relevant. **Remove any secrets or sensitive values.**"
+      render: yaml
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Aegis is affected?
+      options:
+        - Gate (proxy)
+        - Vault (credential storage)
+        - Ledger (audit log)
+        - Agent (identity/auth)
+        - Policy Engine
+        - MCP Server
+        - Dashboard
+        - CLI
+        - Configuration
+        - Key Storage (keychain)
+        - Other
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues to make sure this isn't a duplicate
+          required: true
+        - label: I have redacted all secrets and API keys from the report
+          required: true

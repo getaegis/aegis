@@ -8,4 +8,10 @@
   <circle fill="none" stroke="#E8ECEF" cx="50" cy="50" r="36" stroke-width="1.2"/>
   <circle fill="none" stroke="#E8ECEF" cx="50" cy="50" r="14" stroke-width="1.5"/>
   <circle fill="#E8ECEF" cx="50" cy="50" r="5.5"/>
+
+  <!-- Orbital dots (just inside the inner rim ring) -->
+  <circle fill="#E8ECEF" cx="50" cy="18" r="2.2"/>  <!-- top -->
+  <circle fill="#E8ECEF" cx="18" cy="50" r="2.2"/>  <!-- left -->
+  <circle fill="#E8ECEF" cx="82" cy="50" r="2.2"/>  <!-- right -->
+  <circle fill="#E8ECEF" cx="50" cy="82" r="2.2"/>  <!-- bottom -->
 </svg>

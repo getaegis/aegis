@@ -19,9 +19,11 @@ dashboard/.yarn/*
 
 # Aegis config — may contain master key
 aegis.config.yaml
+!examples/**/aegis.config.yaml
 
 # Local policy files (manual testing)
 policies/
+!examples/**/policies/
 
 # Environment
 .env

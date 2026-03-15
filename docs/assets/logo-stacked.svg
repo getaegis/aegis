@@ -12,6 +12,12 @@
     <circle fill="none" stroke="#C8973E" cx="100" cy="60" r="36" stroke-width="1.2"/>
     <circle fill="none" stroke="#C8973E" cx="100" cy="60" r="14" stroke-width="1.5"/>
     <circle fill="#C8973E" cx="100" cy="60" r="5.5"/>
+
+    <!-- Orbital dots (just inside the inner rim ring) -->
+    <circle fill="#C8973E" cx="100" cy="28" r="2.2"/>  <!-- top -->
+    <circle fill="#C8973E" cx="68" cy="60" r="2.2"/>   <!-- left -->
+    <circle fill="#C8973E" cx="132" cy="60" r="2.2"/>  <!-- right -->
+    <circle fill="#C8973E" cx="100" cy="92" r="2.2"/>  <!-- bottom -->
   </g>
 
   <!-- Wordmark (centred below the shield) -->

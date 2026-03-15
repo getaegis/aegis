@@ -17,4 +17,10 @@
 
   <!-- Central dot -->
   <circle fill="#C8973E" cx="50" cy="50" r="5.5"/>
+
+  <!-- Orbital dots (just inside the inner rim ring) -->
+  <circle fill="#C8973E" cx="50" cy="18" r="2.2"/>  <!-- top -->
+  <circle fill="#C8973E" cx="18" cy="50" r="2.2"/>  <!-- left -->
+  <circle fill="#C8973E" cx="82" cy="50" r="2.2"/>  <!-- right -->
+  <circle fill="#C8973E" cx="50" cy="82" r="2.2"/>  <!-- bottom -->
 </svg>

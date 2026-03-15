@@ -1,0 +1,14 @@
+gate:
+  port: 3100
+  require_agent_auth: true
+  policy_mode: enforce
+  policies_dir: ./policies
+
+vault:
+  name: default
+  data_dir: ./.aegis
+
+observability:
+  log_level: info
+  log_format: pretty
+  metrics: true

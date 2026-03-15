@@ -1,0 +1,24 @@
+# Policy: github-assistant agent — read + create access to GitHub repos
+#
+# This agent can list repos, read issues/PRs, and create new issues.
+# It cannot delete repos, close issues, or access admin endpoints.
+# Restricted to a specific org's repos via path pattern.
+
+agent: github-assistant
+rules:
+  - service: github
+    methods: [GET]
+    paths:
+      - /user/repos
+      - /repos/your-org/.*
+      - /search/.*
+      - /orgs/your-org/.*
+    rate_limit: 200/min
+
+  - service: github
+    methods: [POST]
+    paths:
+      - /repos/your-org/.*/issues
+      - /repos/your-org/.*/pulls
+      - /repos/your-org/.*/comments
+    rate_limit: 50/min

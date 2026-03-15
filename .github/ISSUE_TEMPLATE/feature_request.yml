@@ -1,0 +1,68 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! We'd love to hear what would make Aegis more useful for you.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Use Case
+      description: What problem are you trying to solve? What's your use case?
+      placeholder: "I'm trying to... but Aegis doesn't currently..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How do you think this should work?
+      placeholder: "It would be great if Aegis could..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any workarounds or alternative approaches?
+      placeholder: "I've tried... but it doesn't work because..."
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Aegis would this affect?
+      options:
+        - Gate (proxy)
+        - Vault (credential storage)
+        - Ledger (audit log)
+        - Agent (identity/auth)
+        - Policy Engine
+        - MCP Server
+        - Dashboard
+        - CLI
+        - Configuration
+        - New module/feature
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: How important is this to you?
+      options:
+        - Nice to have
+        - Important — affects my workflow
+        - Critical — blocking my use of Aegis
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues and the [roadmap](https://github.com/getaegis/aegis/blob/master/docs/ROADMAP.md) to check if this is already planned
+          required: true

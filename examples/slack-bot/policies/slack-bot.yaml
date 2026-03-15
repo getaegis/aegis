@@ -1,0 +1,18 @@
+# Policy: slack-reader agent — read-only access to Slack API
+#
+# This policy restricts the agent to GET requests only, limited to
+# specific Slack Web API methods (conversations, users, auth).
+# POST/PUT/DELETE methods are blocked, preventing the agent from
+# sending messages, modifying channels, or deleting content.
+
+agent: slack-reader
+rules:
+  - service: slack
+    methods: [GET]
+    paths:
+      - /api/conversations\..*
+      - /api/users\..*
+      - /api/auth\.test
+      - /api/team\.info
+      - /api/emoji\.list
+    rate_limit: 100/min
