@@ -455,12 +455,15 @@ export interface PolicyRequest {
  * Handles midnight-spanning windows (e.g. 22:00 → 06:00).
  */
 function isWithinTimeWindow(timeWindow: TimeWindow, now: Date): boolean {
-  // Get the current time in the specified timezone
+  // Get the current time in the specified timezone.
+  // Use hourCycle: 'h23' (range 0-23) instead of hour12: false, because
+  // hour12: false resolves to hourCycle 'h24' (range 1-24) on Node 20's
+  // ICU, which returns hour "24" for midnight — breaking time comparisons.
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: timeWindow.timezone,
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
   });
 
   const parts = formatter.formatToParts(now);
@@ -476,11 +479,11 @@ function isWithinTimeWindow(timeWindow: TimeWindow, now: Date): boolean {
   const endMinutes = endH * 60 + endM;
 
   if (startMinutes <= endMinutes) {
-    // Normal window: e.g. 09:00 → 18:00
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    // Normal window: e.g. 09:00 → 18:00 (both bounds inclusive)
+    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
   }
-  // Midnight-spanning window: e.g. 22:00 → 06:00
-  return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+  // Midnight-spanning window: e.g. 22:00 → 06:00 (both bounds inclusive)
+  return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
 }
 
 /**
