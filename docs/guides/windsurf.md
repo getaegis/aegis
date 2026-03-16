@@ -28,7 +28,26 @@ aegis agent grant --agent windsurf-cascade --credential slack-bot
 
 > **Service naming note:** the service name you store (`--service slack`) must match what Cascade later sends in `aegis_proxy_request`.
 
-## Setup
+## Quick Setup (Recommended)
+
+Use `aegis mcp config` to generate the correct configuration. This is the **strongly recommended** path — it includes environment variables (`HOME`, `PATH`, `AEGIS_DATA_DIR`) that MCP hosts need but don't inherit from your shell:
+
+```bash
+# Generate Windsurf config (stdio transport — recommended)
+aegis mcp config windsurf
+
+# With an agent token
+aegis mcp config windsurf --agent-token aegis_abc123...
+
+# Using HTTP transport
+aegis mcp config windsurf --transport streamable-http --port 3200
+```
+
+Copy the generated JSON into your Windsurf MCP config file.
+
+> **Important:** Do not write the config JSON by hand. Windsurf spawns Aegis as a child process without your shell environment. Without the `env` block that `aegis mcp config` generates, Aegis won't find your vault and will fail with path errors.
+
+## Manual Setup
 
 ### Step 1: Open the MCP Config File
 
@@ -43,7 +62,11 @@ You can access it through the Windsurf UI:
 2. Or go to **Windsurf Settings** → **Cascade** → **MCP Servers**
 3. Edit the raw `mcp_config.json` file
 
-### Step 2: Add Aegis as an MCP Server
+### Step 2: Paste the Generated Config
+
+Paste the output of `aegis mcp config windsurf` into this file. If you need to write it manually:
+
+> **Warning:** You **must** include an `env` block with `HOME`, `PATH`, and `AEGIS_DATA_DIR`. Without these, the MCP server will fail.
 
 #### Option A: stdio transport (recommended)
 
@@ -59,29 +82,18 @@ You can access it through the Windsurf UI:
         "stdio",
         "--agent-token",
         "aegis_your-agent-token-here"
-      ]
+      ],
+      "env": {
+        "HOME": "/Users/yourname",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "AEGIS_DATA_DIR": "/path/to/your/project/.aegis"
+      }
     }
   }
 }
 ```
 
-If `aegis` is not on your PATH, use full paths:
-
-```json
-{
-  "mcpServers": {
-    "aegis": {
-      "command": "/usr/local/bin/node",
-      "args": [
-        "/path/to/aegis/dist/cli.js",
-        "mcp",
-        "serve",
-        "--transport",
-        "stdio"
-      ]
-    }
-  }
-}
+> **Easier alternative:** Run `aegis mcp config windsurf --agent-token <token>` to generate this with the correct paths.
 ```
 
 #### Option B: Streamable HTTP transport

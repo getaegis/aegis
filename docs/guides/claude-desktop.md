@@ -12,7 +12,7 @@
 
 ## Quick Setup (Recommended)
 
-Aegis can generate the configuration for you. This is the preferred path because it keeps the setup consistent with the actual CLI output:
+Use `aegis mcp config` to generate the correct configuration. This is the **strongly recommended** path — it includes environment variables (`HOME`, `PATH`, `AEGIS_DATA_DIR`) that MCP hosts need but don't inherit from your shell:
 
 ```bash
 # Generate Claude Desktop config (stdio transport — recommended)
@@ -26,6 +26,8 @@ aegis mcp config claude --transport streamable-http --port 3200
 ```
 
 Copy the generated JSON into your Claude Desktop config file.
+
+> **Important:** Do not write the config JSON by hand. MCP hosts like Claude Desktop spawn Aegis as a child process without your shell environment. Without the `env` block that `aegis mcp config` generates, Aegis won't find your vault and will fail with path errors.
 
 Before you do that, make sure the Claude agent can actually use a credential:
 
@@ -44,6 +46,8 @@ aegis agent grant --agent claude-desktop --credential github-bot
 > **Service naming note:** the service name you store (`--service github`) must match what the MCP tool uses later (`service: "github"`).
 
 ## Manual Setup
+
+> **Warning:** If you write the config JSON by hand, you **must** include an `env` block with `HOME`, `PATH`, and `AEGIS_DATA_DIR`. Without these, the MCP server will fail because Claude Desktop doesn't inherit your shell environment. Use `aegis mcp config claude` instead to avoid this.
 
 ### Step 1: Locate Your Config File
 
@@ -75,7 +79,12 @@ The server runs as a child process managed by Claude Desktop. No port needed.
         "serve",
         "--transport",
         "stdio"
-      ]
+      ],
+      "env": {
+        "HOME": "/Users/yourname",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "AEGIS_DATA_DIR": "/path/to/your/project/.aegis"
+      }
     }
   }
 }
@@ -91,18 +100,12 @@ which node
 # Get your Aegis CLI path (if installed globally via npm)
 which aegis
 # Or use the dist/cli.js from your Aegis installation directory
+
+# Get your AEGIS_DATA_DIR (wherever you ran aegis init)
+ls ~/.aegis  # or /path/to/your/project/.aegis
 ```
 
-If you installed Aegis globally via npm:
-```json
-{
-  "mcpServers": {
-    "aegis": {
-      "command": "aegis",
-      "args": ["mcp", "serve", "--transport", "stdio"]
-    }
-  }
-}
+> **Easier alternative:** Run `aegis mcp config claude` from the directory where you ran `aegis init`. It fills in all the paths automatically.
 ```
 
 #### Option B: Streamable HTTP transport
@@ -127,25 +130,15 @@ aegis mcp serve --transport streamable-http --port 3200
 
 ### Step 3: Add Agent Authentication (Recommended)
 
-For authenticated sessions, include an agent token in the args:
+For authenticated sessions, include an agent token. The easiest way:
 
-```json
-{
-  "mcpServers": {
-    "aegis": {
-      "command": "aegis",
-      "args": [
-        "mcp",
-        "serve",
-        "--transport",
-        "stdio",
-        "--agent-token",
-        "aegis_your-agent-token-here"
-      ]
-    }
-  }
-}
+```bash
+aegis agent add --name claude-desktop
+# Copy the token, then:
+aegis mcp config claude --agent-token aegis_your-token-here
 ```
+
+If configuring manually, add `--agent-token` to the args (the `env` block is still required).
 
 Generate a token:
 ```bash

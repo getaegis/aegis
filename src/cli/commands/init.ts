@@ -185,7 +185,7 @@ observability:
       console.log('  Data directory: ./.aegis\n');
       console.log('  Next steps:');
       console.log(
-        '    1. Add a credential:  aegis vault add --name slack --service slack --secret xoxb-... --domains api.slack.com',
+        '    1. Add a credential:  aegis vault add --name slack --service slack --secret xoxb-... --domains slack.com',
       );
       console.log('    2. Start the gate:    aegis gate');
       console.log('    3. Point your agent:  http://localhost:3100/{service}/api/path\n');

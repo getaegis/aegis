@@ -28,6 +28,25 @@ aegis agent grant --agent cline-agent --credential github-bot
 
 > **Service naming note:** the service name you store (`--service github`) must match what Cline later sends in `aegis_proxy_request`.
 
+## Quick Setup (Recommended)
+
+Use `aegis mcp config` to generate the correct configuration. This is the **strongly recommended** path — it includes environment variables (`HOME`, `PATH`, `AEGIS_DATA_DIR`) that MCP hosts need but don't inherit from your shell:
+
+```bash
+# Generate Cline config (stdio transport — recommended)
+aegis mcp config cline
+
+# With an agent token
+aegis mcp config cline --agent-token aegis_abc123...
+
+# Using HTTP transport
+aegis mcp config cline --transport streamable-http --port 3200
+```
+
+Copy the generated JSON into your Cline MCP settings file.
+
+> **Important:** Do not write the config JSON by hand. Cline spawns Aegis as a child process without your shell environment. Without the `env` block that `aegis mcp config` generates, Aegis won't find your vault and will fail with path errors.
+
 ## Setup
 
 ### Step 1: Open the MCP Configuration
@@ -41,7 +60,11 @@ Cline stores MCP settings in `cline_mcp_settings.json`, managed through the Clin
 
 This opens the settings file for editing.
 
-### Step 2: Add Aegis as an MCP Server
+### Step 2: Paste the Generated Config
+
+Paste the output of `aegis mcp config cline` into this file. If you need to write it manually:
+
+> **Warning:** You **must** include an `env` block with `HOME`, `PATH`, and `AEGIS_DATA_DIR`. Without these, the MCP server will fail.
 
 #### Option A: stdio transport (recommended)
 
@@ -58,30 +81,18 @@ This opens the settings file for editing.
         "--agent-token",
         "aegis_your-agent-token-here"
       ],
+      "env": {
+        "HOME": "/Users/yourname",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "AEGIS_DATA_DIR": "/path/to/your/project/.aegis"
+      },
       "disabled": false
     }
   }
 }
 ```
 
-If `aegis` is not on your PATH, use full paths:
-
-```json
-{
-  "mcpServers": {
-    "aegis": {
-      "command": "/usr/local/bin/node",
-      "args": [
-        "/path/to/aegis/dist/cli.js",
-        "mcp",
-        "serve",
-        "--transport",
-        "stdio"
-      ],
-      "disabled": false
-    }
-  }
-}
+> **Easier alternative:** Run `aegis mcp config cline --agent-token <token>` to generate this with the correct paths.
 ```
 
 #### Option B: Streamable HTTP transport (SSE)

@@ -12,7 +12,7 @@
 
 ## Quick Setup (Recommended)
 
-Aegis can generate the configuration for you. This is the preferred path because it keeps the setup consistent with the actual CLI output:
+Use `aegis mcp config` to generate the correct configuration. This is the **strongly recommended** path — it includes environment variables (`HOME`, `PATH`, `AEGIS_DATA_DIR`) that MCP hosts need but don't inherit from your shell:
 
 ```bash
 # Generate VS Code config (stdio transport — recommended)
@@ -26,6 +26,8 @@ aegis mcp config vscode --transport streamable-http --port 3200
 ```
 
 Copy the generated JSON into your VS Code MCP configuration.
+
+> **Important:** Do not write the config JSON by hand. MCP hosts like VS Code spawn Aegis as a child process without your shell environment. Without the `env` block that `aegis mcp config` generates, Aegis won't find your vault and will fail with path errors.
 
 Before you paste it, make sure the VS Code agent can actually access a credential:
 
@@ -59,6 +61,8 @@ The built-in config generator currently prints VS Code configuration for `settin
 
 ### Step 2: Add Aegis as an MCP Server
 
+> **Warning:** If you write the config JSON by hand, you **must** include an `env` block with `HOME`, `PATH`, and `AEGIS_DATA_DIR`. Without these, the MCP server will fail because VS Code doesn't inherit your shell environment. Use `aegis mcp config vscode` instead to avoid this.
+
 Open or create `.vscode/settings.json` in your project root, then add an `mcp` section:
 
 #### Option A: stdio transport (recommended)
@@ -77,33 +81,19 @@ Open or create `.vscode/settings.json` in your project root, then add an `mcp` s
           "stdio",
           "--agent-token",
           "aegis_your-agent-token-here"
-        ]
+        ],
+        "env": {
+          "HOME": "/Users/yourname",
+          "PATH": "/usr/local/bin:/usr/bin:/bin",
+          "AEGIS_DATA_DIR": "/path/to/your/project/.aegis"
+        }
       }
     }
   }
 }
 ```
 
-If `aegis` is not on your PATH, use full paths:
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "aegis": {
-        "type": "stdio",
-        "command": "/usr/local/bin/node",
-        "args": [
-          "/path/to/aegis/dist/cli.js",
-          "mcp",
-          "serve",
-          "--transport",
-          "stdio"
-        ]
-      }
-    }
-  }
-}
+> **Easier alternative:** Run `aegis mcp config vscode --agent-token <token>` to generate this with the correct paths.
 ```
 
 #### Option B: Streamable HTTP transport
@@ -182,6 +172,11 @@ VS Code supports sandboxing for MCP servers to restrict file system and network 
         "type": "stdio",
         "command": "aegis",
         "args": ["mcp", "serve", "--transport", "stdio"],
+        "env": {
+          "HOME": "/Users/yourname",
+          "PATH": "/usr/local/bin:/usr/bin:/bin",
+          "AEGIS_DATA_DIR": "/path/to/your/project/.aegis"
+        },
         "sandboxEnabled": true,
         "sandbox": {
           "network": {

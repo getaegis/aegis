@@ -1,4 +1,5 @@
 import { type View } from '../../App';
+import logoMark from '../../assets/logo-mark.svg';
 import {
   LayoutDashboard,
   Radio,
@@ -35,12 +36,7 @@ export function Sidebar({ currentView, onNavigate }: SidebarProps): React.ReactE
         className="flex items-center gap-3 border-b border-border px-5"
         style={{ height: 'var(--header-height)' }}
       >
-        <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true">
-          <circle cx="50" cy="50" r="45" fill="none" stroke="#C8973E" strokeWidth="5" />
-          <circle cx="50" cy="50" r="32" fill="none" stroke="#C8973E" strokeWidth="4" />
-          <circle cx="50" cy="50" r="18" fill="none" stroke="#C8973E" strokeWidth="3" />
-          <circle cx="50" cy="50" r="5" fill="#C8973E" />
-        </svg>
+        <img src={logoMark} width="36" height="36" alt="" aria-hidden="true" />
         <span className="text-[15px] font-semibold text-primary">Aegis</span>
       </div>
 

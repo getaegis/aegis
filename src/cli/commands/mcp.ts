@@ -135,7 +135,7 @@ export function register(program: Command): void {
   mcpCmd
     .command('config')
     .description('Generate MCP client configuration for popular hosts')
-    .argument('<host>', 'Target host: "claude", "cursor", or "vscode"')
+    .argument('<host>', 'Target host: "claude", "cursor", "vscode", "cline", or "windsurf"')
     .option('--transport <type>', 'Transport type (default: stdio)', 'stdio')
     .option('--port <port>', 'Port for streamable-http transport (default: 3200)', '3200')
     .option('--agent-token <token>', 'Agent token to include in the configuration')
@@ -201,96 +201,73 @@ export function register(program: Command): void {
 
       const args = buildArgs();
 
-      switch (host.toLowerCase()) {
-        case 'claude': {
-          if (transport === 'streamable-http') {
-            const config = {
-              mcpServers: {
-                aegis: {
-                  url: `http://127.0.0.1:${port}/mcp`,
-                },
-              },
-            };
-            console.log('Add this to your Claude Desktop config (claude_desktop_config.json):');
-            console.log();
-            console.log(JSON.stringify(config, null, 2));
-          } else {
-            const config = {
-              mcpServers: {
-                aegis: {
-                  command: aegisCmd,
-                  args,
-                  env: stdioEnv,
-                },
-              },
-            };
-            console.log('Add this to your Claude Desktop config (claude_desktop_config.json):');
-            console.log();
-            console.log(JSON.stringify(config, null, 2));
-          }
-          break;
-        }
-        case 'cursor': {
-          if (transport === 'streamable-http') {
-            const config = {
-              mcpServers: {
-                aegis: {
-                  url: `http://127.0.0.1:${port}/mcp`,
-                },
-              },
-            };
-            console.log('Add this to your Cursor MCP config (.cursor/mcp.json):');
-            console.log();
-            console.log(JSON.stringify(config, null, 2));
-          } else {
-            const config = {
-              mcpServers: {
-                aegis: {
-                  command: aegisCmd,
-                  args,
-                  env: stdioEnv,
-                },
-              },
-            };
-            console.log('Add this to your Cursor MCP config (.cursor/mcp.json):');
-            console.log();
-            console.log(JSON.stringify(config, null, 2));
-          }
-          break;
-        }
-        case 'vscode': {
-          if (transport === 'streamable-http') {
-            const config = {
-              servers: {
-                aegis: {
-                  type: 'http',
-                  url: `http://127.0.0.1:${port}/mcp`,
-                },
-              },
-            };
-            console.log('Add this to your VS Code settings (settings.json) under "mcp":');
-            console.log();
-            console.log(JSON.stringify(config, null, 2));
-          } else {
-            const config = {
-              servers: {
-                aegis: {
-                  type: 'stdio',
-                  command: aegisCmd,
-                  args,
-                  env: stdioEnv,
-                },
-              },
-            };
-            console.log('Add this to your VS Code settings (settings.json) under "mcp":');
-            console.log();
-            console.log(JSON.stringify(config, null, 2));
-          }
-          break;
-        }
-        default:
-          console.error(`Unknown host: ${host}. Supported hosts: claude, cursor, vscode`);
-          process.exit(1);
+      // ── Host definitions ──
+      // Each host defines its config file hint and how to build the JSON block.
+      // VS Code uses "servers" with a "type" field; all others use "mcpServers".
+      // Cline adds "disabled: false".
+      interface HostDef {
+        fileHint: string;
+        wrapperKey: 'mcpServers' | 'servers';
+        extraFields?: Record<string, unknown>;
+        stdioType?: string; // VS Code needs type: "stdio" / "http"
       }
+
+      const hosts: Record<string, HostDef> = {
+        claude: {
+          fileHint: 'Claude Desktop config (claude_desktop_config.json)',
+          wrapperKey: 'mcpServers',
+        },
+        cursor: {
+          fileHint: 'Cursor MCP config (.cursor/mcp.json)',
+          wrapperKey: 'mcpServers',
+        },
+        vscode: {
+          fileHint: 'VS Code settings (settings.json) under "mcp"',
+          wrapperKey: 'servers',
+          stdioType: 'stdio',
+        },
+        cline: {
+          fileHint: 'Cline MCP settings (cline_mcp_settings.json)',
+          wrapperKey: 'mcpServers',
+          extraFields: { disabled: false },
+        },
+        windsurf: {
+          fileHint: 'Windsurf MCP config (~/.codeium/windsurf/mcp_config.json)',
+          wrapperKey: 'mcpServers',
+        },
+      };
+
+      const hostDef = hosts[host.toLowerCase()];
+      if (!hostDef) {
+        console.error(`Unknown host: ${host}. Supported hosts: ${Object.keys(hosts).join(', ')}`);
+        process.exit(1);
+      }
+
+      let serverEntry: Record<string, unknown>;
+      if (transport === 'streamable-http') {
+        serverEntry = {
+          ...(hostDef.stdioType ? { type: 'http' } : {}),
+          url: `http://127.0.0.1:${port}/mcp`,
+          ...hostDef.extraFields,
+        };
+      } else {
+        serverEntry = {
+          ...(hostDef.stdioType ? { type: hostDef.stdioType } : {}),
+          command: aegisCmd,
+          args,
+          env: stdioEnv,
+          ...hostDef.extraFields,
+        };
+      }
+
+      const config = {
+        [hostDef.wrapperKey]: {
+          aegis: serverEntry,
+        },
+      };
+
+      console.log(`Add this to your ${hostDef.fileHint}:`);
+      console.log();
+      console.log(JSON.stringify(config, null, 2));
     });
 }

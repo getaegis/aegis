@@ -66,7 +66,7 @@ aegis vault add \
   --name slack-bot \
   --service slack \
   --secret "xoxb-your-token-here" \
-  --domains api.slack.com
+  --domains slack.com
 
 # Start the proxy
 aegis gate --no-agent-auth
@@ -74,7 +74,7 @@ aegis gate --no-agent-auth
 # Test it — Aegis injects the token, forwards to Slack, logs the request
 # X-Target-Host tells Gate which upstream server to forward to (optional if credential has one domain)
 curl http://localhost:3100/slack/api/auth.test \
-  -H "X-Target-Host: api.slack.com"
+  -H "X-Target-Host: slack.com"
 ```
 
 ### Production Setup (with agent auth)
@@ -92,7 +92,7 @@ aegis gate
 
 # Agent must include its token
 curl http://localhost:3100/slack/api/auth.test \
-  -H "X-Target-Host: api.slack.com" \
+  -H "X-Target-Host: slack.com" \
   -H "X-Aegis-Agent: aegis_a1b2c3d4..."
 ```
 
@@ -131,6 +131,8 @@ Generate the config for your AI host:
 aegis mcp config claude   # Claude Desktop
 aegis mcp config cursor   # Cursor
 aegis mcp config vscode   # VS Code
+aegis mcp config cline    # Cline
+aegis mcp config windsurf # Windsurf
 ```
 
 The MCP server exposes three tools:

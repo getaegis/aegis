@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -140,6 +141,16 @@ export function findConfigFile(cwd?: string): string | null {
     if (projectDir !== searchDir) {
       for (const name of CONFIG_FILE_NAMES) {
         const filePath = path.join(projectDir, name);
+        if (fs.existsSync(filePath)) return filePath;
+      }
+    }
+
+    // Fallback: search $HOME — MCP hosts often spawn processes with CWD=/
+    // and the config file lives in the user's home directory or project dir.
+    const home = os.homedir();
+    if (home && home !== searchDir && home !== projectDir) {
+      for (const name of CONFIG_FILE_NAMES) {
+        const filePath = path.join(home, name);
         if (fs.existsSync(filePath)) return filePath;
       }
     }
@@ -416,8 +427,12 @@ export function getConfig(): AegisConfig {
 
   // Base directory for resolving relative paths:
   // If a config file was found, use its directory (so MCP servers spawned
-  // from any cwd still resolve .aegis/ correctly). Otherwise use process.cwd().
-  const baseDir = configFilePath ? path.dirname(path.resolve(configFilePath)) : process.cwd();
+  // from any cwd still resolve .aegis/ correctly). Otherwise fall back to
+  // HOME (handles MCP hosts that spawn from / or unpredictable CWDs),
+  // then process.cwd() as a last resort.
+  const baseDir = configFilePath
+    ? path.dirname(path.resolve(configFilePath))
+    : os.homedir() || process.cwd();
 
   // Layer 1: .env (loaded into env layer, searched relative to baseDir)
   const dotenv = loadEnv(path.join(baseDir, '.env'));

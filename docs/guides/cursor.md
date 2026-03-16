@@ -12,7 +12,7 @@
 
 ## Quick Setup (Recommended)
 
-Aegis can generate the configuration for you. This is the preferred path because it keeps the setup consistent with the actual CLI output:
+Use `aegis mcp config` to generate the correct configuration. This is the **strongly recommended** path — it includes environment variables (`HOME`, `PATH`, `AEGIS_DATA_DIR`) that MCP hosts need but don't inherit from your shell:
 
 ```bash
 # Generate Cursor config (stdio transport — recommended)
@@ -26,6 +26,8 @@ aegis mcp config cursor --transport streamable-http --port 3200
 ```
 
 Copy the generated JSON into your Cursor MCP config file.
+
+> **Important:** Do not write the config JSON by hand. MCP hosts like Cursor spawn Aegis as a child process without your shell environment. Without the `env` block that `aegis mcp config` generates, Aegis won't find your vault and will fail with path errors.
 
 Before you paste it, make sure the Cursor agent can actually access a credential:
 
@@ -44,6 +46,8 @@ aegis agent grant --agent cursor-agent --credential github-bot
 > **Service naming note:** the service name you store (`--service github`) must match what Cursor later sends in `aegis_proxy_request`.
 
 ## Manual Setup
+
+> **Warning:** If you write the config JSON by hand, you **must** include an `env` block with `HOME`, `PATH`, and `AEGIS_DATA_DIR`. Without these, the MCP server will fail because Cursor doesn't inherit your shell environment. Use `aegis mcp config cursor` instead to avoid this.
 
 ### Step 1: Locate Your Config File
 
@@ -70,29 +74,18 @@ aegis agent grant --agent cursor-agent --credential github-bot
         "stdio",
         "--agent-token",
         "aegis_your-agent-token-here"
-      ]
+      ],
+      "env": {
+        "HOME": "/Users/yourname",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "AEGIS_DATA_DIR": "/path/to/your/project/.aegis"
+      }
     }
   }
 }
 ```
 
-If `aegis` is not on your PATH (e.g., installed locally), use the full path:
-
-```json
-{
-  "mcpServers": {
-    "aegis": {
-      "command": "/usr/local/bin/node",
-      "args": [
-        "/path/to/aegis/dist/cli.js",
-        "mcp",
-        "serve",
-        "--transport",
-        "stdio"
-      ]
-    }
-  }
-}
+> **Easier alternative:** Run `aegis mcp config cursor --agent-token <token>` to generate this with the correct paths.
 ```
 
 #### Option B: Streamable HTTP transport

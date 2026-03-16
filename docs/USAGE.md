@@ -76,18 +76,18 @@ The `X-Target-Host` header tells Gate which upstream server to forward the reque
 
 ```bash
 curl http://localhost:3100/slack/api/auth.test \
-  -H "X-Target-Host: api.slack.com"
+  -H "X-Target-Host: slack.com"
 ```
 
 **When is it optional?** If the credential has only one domain in its allowlist, Gate automatically uses that domain as the target. You can omit `X-Target-Host` in this case:
 
 ```bash
-# Credential was added with: --domains api.slack.com
+# Credential was added with: --domains slack.com
 # Gate knows where to send it — X-Target-Host is optional
 curl http://localhost:3100/slack/api/auth.test
 ```
 
-**When is it required?** If the credential has multiple domains (e.g. `--domains api.slack.com,hooks.slack.com`), you must specify which one to target:
+**When is it required?** If the credential has multiple domains (e.g. `--domains slack.com,hooks.slack.com`), you must specify which one to target:
 
 ```bash
 curl http://localhost:3100/slack/api/auth.test \
@@ -119,7 +119,7 @@ aegis gate
 
 # Agent must include its token in every request
 curl http://localhost:3100/slack/api/auth.test \
-  -H "X-Target-Host: api.slack.com" \
+  -H "X-Target-Host: slack.com" \
   -H "X-Aegis-Agent: aegis_a1b2c3d4..."
 
 # To disable agent auth (not recommended):

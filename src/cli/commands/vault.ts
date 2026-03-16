@@ -32,7 +32,7 @@ export function register(program: Command): void {
     .requiredOption('--secret <secret>', 'The API key or token')
     .requiredOption(
       '-d, --domains <domains>',
-      'Comma-separated allowed domains (e.g. api.slack.com,*.slack.com)',
+      'Comma-separated allowed domains (e.g. slack.com,*.example.com)',
     )
     .option('-a, --auth-type <type>', 'Auth injection type: bearer, header, basic, query', 'bearer')
     .option('--header-name <name>', 'Custom header name (for auth-type: header)')
