@@ -3,7 +3,7 @@
 A systematic analysis of security threats to Aegis using the STRIDE framework (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege). Each threat is assessed for likelihood, impact, and current mitigation status.
 
 **Last updated:** 17 March 2026
-**Version:** 0.9.8
+**Version:** 1.0.0
 
 ---
 
