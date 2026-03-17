@@ -2,8 +2,8 @@
 
 A systematic analysis of security threats to Aegis using the STRIDE framework (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege). Each threat is assessed for likelihood, impact, and current mitigation status.
 
-**Last updated:** 11 March 2026
-**Version:** 0.9.7
+**Last updated:** 17 March 2026
+**Version:** 0.9.8
 
 ---
 
@@ -264,7 +264,7 @@ Repudiation threats involve a user denying they performed an action when there i
 | **Impact** | High — destroys the audit trail. |
 | **Mitigations** | |
 | ✅ Implemented | Webhook alerts fire in real-time for security events — even if the Ledger is deleted, external systems have received the events. |
-| ⬜ Future | Database backup command (`aegis backup`) for point-in-time copies. |
+| ✅ Implemented | Database backup and restore commands (`aegis db backup` / `aegis db restore`) for point-in-time copies. |
 | ⬜ Future | Append-only log mode or write-once storage integration. |
 | ⬜ Future | Remote syslog/SIEM forwarding for tamper-resistant audit storage. |
 | **Residual Risk** | Medium — local SQLite file can be deleted. Webhook alerts provide partial mitigation but only for configured event types, not the full audit trail. |
@@ -325,7 +325,7 @@ Information disclosure threats involve exposing sensitive data to unauthorised p
 | ✅ Implemented | `aegis init` defaults to printing the master key to stdout (user stores it securely). `--write-secrets` must be explicitly chosen. |
 | ✅ Implemented | When written to `.env`, file permissions are set to `0600` (owner read/write only). |
 | ✅ Implemented | Shamir's Secret Sharing — master key can be split into K-of-N shares, requiring multiple parties to unseal. |
-| ✅ Implemented | **Cross-platform key storage (v0.8.4)** — `aegis init` stores the master key in the OS keychain by default: macOS Keychain (`security` CLI), Windows Credential Manager (`cmdkey` + PowerShell), Linux Secret Service (`secret-tool`). File fallback (`.aegis/.master-key`, mode 0600) when no keychain is available. `--env-file` flag for CI/headless environments. |
+| ✅ Implemented | **Cross-platform key storage** — `aegis init` stores the master key in the OS keychain by default: macOS Keychain (`security` CLI), Windows Credential Manager (`cmdkey` + PowerShell), Linux Secret Service (`secret-tool`). File fallback (`.aegis/.master-key`, mode 0600) when no keychain is available. `--env-file` flag for CI/headless environments. |
 | ✅ Implemented | `aegis key where` diagnostics command shows where the master key is stored and which backend is active. |
 | ✅ Implemented | `aegis doctor` checks key storage backend type and reports whether a key is present. |
 | **Residual Risk** | Low — OS keychains are encrypted and access-controlled, significantly reducing the attack surface compared to plaintext `.env`. The file fallback (`.aegis/.master-key`) is restricted to mode 0600 and warns if permissions are too open. The in-memory derived key at runtime remains accessible via process memory dump (see I-5), but this requires debugger attachment or core dump access. |
@@ -555,8 +555,8 @@ The following residual risks are accepted with documented rationale and planned 
 | Risk | Rationale | Planned Mitigation |
 |------|-----------|-------------------|
 | **T-5: Policy file tampering** | Policy files on disk are trusted. Filesystem compromise already implies machine compromise (Trust Boundary 1 violation). | Future: Signed policy files (HMAC or GPG signature verification). |
-| **R-2: Audit log deletion** | SQLite file can be deleted. Webhook alerts provide partial real-time mitigation. | Future: Database backup command, remote syslog forwarding, append-only mode. |
-| **I-3: Master key on disk** | OS keychain is the default storage (v0.8.4). File fallback uses mode 0600. Residual risk is co-resident process attaching a debugger or reading the fallback file. | Resolved via cross-platform key storage. Further hardening: native keychain bindings (avoiding CLI process args). |
+| **R-2: Audit log deletion** | SQLite file can be deleted. Webhook alerts and database backup provide partial mitigation. | Future: Remote syslog forwarding, append-only mode. |
+| **I-3: Master key on disk** | OS keychain is the default storage. File fallback uses mode 0600. Residual risk is co-resident process attaching a debugger or reading the fallback file. | Resolved via cross-platform key storage. Further hardening: native keychain bindings (avoiding CLI process args). |
 | **I-2: Credential leakage via response** | External APIs could echo back injected credentials. No response body scanning exists yet. | Post-v1.0: Response body scanning and redaction (competitive with Infisical Agent Sentinel's PII filtering). |
 | **I-5: Credential leakage in memory** | V8's non-deterministic garbage collection means secrets persist in heap. Fundamental limitation of managed-memory runtimes. | Future: Native addon for explicit buffer zeroing. This is an industry-wide limitation (applies to Python, Java, Go equally). |
 

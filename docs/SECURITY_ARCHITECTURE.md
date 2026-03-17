@@ -2,8 +2,8 @@
 
 A complete technical reference explaining how Aegis protects credentials, where data flows, what decisions were made, and why. Written so that you can audit every trust boundary yourself.
 
-**Last updated:** 11 March 2026
-**Version:** 0.9.7
+**Last updated:** 17 March 2026
+**Version:** 0.9.8
 
 ---
 
@@ -107,38 +107,38 @@ WITH AEGIS:
 │  │           │ ──────────────────────── │       AEGIS GATE        │  │
 │  │  AI Agent │   Agent never has keys   │    (localhost:3100)     │  │
 │  │           │ ◄─────────────────────── │                         │  │
-│  └───────────┘     API responses only   │  ┌──────────────────┐  │  │
-│                                         │  │  HEADER SCRUBBER │  │  │
-│                                         │  │  Strips auth     │  │  │
-│                                         │  │  headers from    │  │  │
-│                                         │  │  agent request   │  │  │
-│                                         │  └────────┬─────────┘  │  │
-│                                         │           │            │  │
-│                                         │  ┌────────▼─────────┐  │  │
-│                                         │  │  DOMAIN GUARD    │  │  │
-│                                         │  │  Is this domain  │  │  │
-│                                         │  │  in the allow-   │  │  │
-│                                         │  │  list?           │  │  │
-│                                         │  └────────┬─────────┘  │  │
-│                                         │      PASS │ FAIL→403   │  │
-│                                         │  ┌────────▼─────────┐  │  │
-│                                         │  │  CRED INJECTOR   │  │  │
-│                                         │  │  Adds real auth  │  │  │
-│                                         │  │  header to       │  │  │
-│                                         │  │  outbound req    │  │  │
-│  ┌───────────┐                          │  └────────┬─────────┘  │  │
-│  │   VAULT   │◄── decrypt on demand ───────────────┤            │  │
-│  │  (SQLite) │                          │           │            │  │
-│  │  AES-256  │                          │  ┌────────▼─────────┐  │  │
-│  │  -GCM     │                          │  │  LEDGER LOGGER   │  │  │
-│  └───────────┘                          │  │  Records every   │  │
-│                                         │  │  request         │  │  │
-│  ┌───────────┐                          │  └────────┬─────────┘  │  │
-│  │  LEDGER   │◄── insert ──────────────────────────┤            │  │
-│  │  (SQLite) │                          │           │            │  │
-│  └───────────┘                          └───────────┼────────────┘  │
-│                                                     │               │
-└─────────────────────────────────────────────────────┼───────────────┘
+│  └───────────┘     API responses only   │  ┌──────────────────┐   │  │
+│                                         │  │  HEADER SCRUBBER │   │  │
+│                                         │  │  Strips auth     │   │  │
+│                                         │  │  headers from    │   │  │
+│                                         │  │  agent request   │   │  │
+│                                         │  └────────┬─────────┘   │  │
+│                                         │           │             │  │
+│                                         │  ┌────────▼─────────┐   │  │
+│                                         │  │  DOMAIN GUARD    │   │  │
+│                                         │  │  Is this domain  │   │  │
+│                                         │  │  in the allow-   │   │  │
+│                                         │  │  list?           │   │  │
+│                                         │  └────────┬─────────┘   │  │
+│                                         │      PASS │ FAIL→403    │  │
+│                                         │  ┌────────▼─────────┐   │  │
+│                                         │  │  CRED INJECTOR   │   │  │
+│                                         │  │  Adds real auth  │   │  │
+│                                         │  │  header to       │   │  │
+│                                         │  │  outbound req    │   │  │
+│  ┌───────────┐                          │  └────────┬─────────┘   │  │
+│  │   VAULT   │◄── decrypt on demand ────────────────┤             │  │
+│  │  (SQLite) │                          │           │             │  │
+│  │  AES-256  │                          │  ┌────────▼─────────┐   │  │
+│  │  -GCM     │                          │  │  LEDGER LOGGER   │   │  │
+│  └───────────┘                          │  │  Records every   │   │  │
+│                                         │  │  request         │   │  │
+│  ┌───────────┐                          │  └────────┬─────────┘   │  │
+│  │  LEDGER   │◄── insert ───────────────────────────┤             │  │
+│  │  (SQLite) │                          │           │             │  │
+│  └───────────┘                          └───────────┼─────────────┘  │
+│                                                     │                │
+└─────────────────────────────────────────────────────┼────────────────┘
                                                       │ HTTPS (TLS 1.2+)
                                                       ▼
                                             ┌──────────────────┐
@@ -240,8 +240,8 @@ User runs: aegis vault add --name slack --service slack --secret xoxb-... --doma
     │                                                             │
     │  4. Encrypt:                                                │
     │     plaintext ("xoxb-...") ──┐                              │
-    │     derivedKey ──────────────┤                               │
-    │     iv ──────────────────────┤                               │
+    │     derivedKey ──────────────┤                              │
+    │     iv ──────────────────────┤                              │
     │                              ▼                              │
     │                    AES-256-GCM encrypt                      │
     │                         │    │                              │
@@ -262,7 +262,7 @@ User runs: aegis vault add --name slack --service slack --secret xoxb-... --doma
     │     │   scopes:    '["*"]' (JSON text)             │        │
     │     └──────────────────────────────────────────────┘        │
     │                                                             │
-    │  ⚠ The plaintext secret ("xoxb-...") is NEVER stored.      │
+    │  ⚠ The plaintext secret ("xoxb-...") is NEVER stored.       │
     │    It exists in memory only during this encrypt operation.  │
     └─────────────────────────────────────────────────────────────┘
 ```
@@ -279,70 +279,70 @@ Agent sends: POST http://localhost:3100/slack/api/chat.postMessage
                       X-Target-Host: api.slack.com     ← optional
                       Authorization: Bearer fake-key   ← agent might try this
 
-    ┌──────────────────────────────────────────────────────────────────┐
-    │                      GATE REQUEST PIPELINE                       │
-    │                                                                  │
-    │  STEP 1: Parse URL                                               │
+    ┌───────────────────────────────────────────────────────────────────┐
+    │                      GATE REQUEST PIPELINE                        │
+    │                                                                   │
+    │  STEP 1: Parse URL                                                │
     │    new URL("/slack/api/chat.postMessage", "http://localhost:3100")│
-    │    pathParts = ["slack", "api", "chat.postMessage"]              │
-    │    serviceName = "slack"                                         │
-    │    remainingPath = "/api/chat.postMessage"                       │
-    │                                                                  │
-    │  STEP 2: Credential Lookup                                       │
-    │    vault.getByService("slack")                                   │
-    │      → SQL: SELECT * FROM credentials WHERE service = 'slack'    │
-    │      → Decrypts secret using cached derivedKey                   │
-    │      → Returns: { secret: "xoxb-real-key", domains: [...], ... } │
-    │    ⚠ Decrypted secret is now in Node.js heap memory              │
-    │    ⚠ It will be garbage collected after this request completes   │
-    │                                                                  │
-    │  STEP 3: Determine Target Domain                                 │
-    │    Read X-Target-Host header → "api.slack.com" (or null)         │
-    │    targetDomain = header value ?? credential.domains[0]          │
-    │                                                                  │
-    │  STEP 4: Domain Guard ★ SECURITY CRITICAL ★                     │
+    │    pathParts = ["slack", "api", "chat.postMessage"]               │
+    │    serviceName = "slack"                                          │
+    │    remainingPath = "/api/chat.postMessage"                        │
+    │                                                                   │
+    │  STEP 2: Credential Lookup                                        │
+    │    vault.getByService("slack")                                    │
+    │      → SQL: SELECT * FROM credentials WHERE service = 'slack'     │
+    │      → Decrypts secret using cached derivedKey                    │
+    │      → Returns: { secret: "xoxb-real-key", domains: [...], ... }  │
+    │    ⚠ Decrypted secret is now in Node.js heap memory               │
+    │    ⚠ It will be garbage collected after this request completes    │
+    │                                                                   │
+    │  STEP 3: Determine Target Domain                                  │
+    │    Read X-Target-Host header → "api.slack.com" (or null)          │
+    │    targetDomain = header value ?? credential.domains[0]           │
+    │                                                                   │
+    │  STEP 4: Domain Guard ★ SECURITY CRITICAL ★                       │
     │    vault.domainMatches("api.slack.com", ["api.slack.com"])        │
-    │      → Is "api.slack.com" in the allowlist? YES → proceed        │
-    │      → If NO → 403 Forbidden, log to Ledger, stop here          │
-    │                                                                  │
-    │  STEP 5: Header Scrubbing                                        │
+    │      → Is "api.slack.com" in the allowlist? YES → proceed         │
+    │      → If NO → 403 Forbidden, log to Ledger, stop here            │
+    │                                                                   │
+    │  STEP 5: Header Scrubbing                                         │
     │    For each header the agent sent:                                │
-    │      ✗ "authorization"  → STRIPPED (agent can't inject auth)     │
-    │      ✗ "x-api-key"      → STRIPPED                               │
-    │      ✗ "host"           → STRIPPED (replaced with target domain) │
-    │      ✗ "x-target-host"  → STRIPPED (internal routing header)     │
-    │      ✓ "content-type"   → KEPT                                   │
-    │      ✓ "accept"         → KEPT                                   │
-    │      ✓ other headers    → KEPT                                   │
-    │                                                                  │
-    │  STEP 6: Credential Injection                                    │
-    │    Based on auth_type:                                           │
-    │      "bearer" → Authorization: Bearer xoxb-real-key              │
-    │      "header" → {headerName}: xoxb-real-key                      │
-    │      "basic"  → Authorization: Basic base64(xoxb-real-key)       │
-    │      "query"  → append ?{paramName}=secret to URL               │
+    │      ✗ "authorization"  → STRIPPED (agent can't inject auth)      │
+    │      ✗ "x-api-key"      → STRIPPED                                │
+    │      ✗ "host"           → STRIPPED (replaced with target domain)  │
+    │      ✗ "x-target-host"  → STRIPPED (internal routing header)      │
+    │      ✓ "content-type"   → KEPT                                    │
+    │      ✓ "accept"         → KEPT                                    │
+    │      ✓ other headers    → KEPT                                    │
+    │                                                                   │
+    │  STEP 6: Credential Injection                                     │
+    │    Based on auth_type:                                            │
+    │      "bearer" → Authorization: Bearer xoxb-real-key               │
+    │      "header" → {headerName}: xoxb-real-key                       │
+    │      "basic"  → Authorization: Basic base64(xoxb-real-key)        │
+    │      "query"  → append ?{paramName}=secret to URL                 │
     │    Also sets: Host: api.slack.com                                 │
-    │                                                                  │
-    │  STEP 7: Forward via HTTPS                                       │
+    │                                                                   │
+    │  STEP 7: Forward via HTTPS                                        │
     │    https.request({                                                │
-    │      hostname: "api.slack.com",     ← validated domain           │
-    │      port: 443,                     ← always TLS                 │
-    │      path: "/api/chat.postMessage", ← from agent's URL          │
-    │      method: "POST",                                             │
-    │      headers: { ...scrubbed, ...injectedAuth }                   │
-    │    })                                                            │
-    │    ⚠ Connection is HTTPS — credential is encrypted in transit    │
-    │    ⚠ Agent's request body is piped through unchanged             │
-    │                                                                  │
-    │  STEP 8: Response Handling                                       │
-    │    Response comes back from api.slack.com                        │
-    │      → Strip set-cookie headers (prevent session hijack)         │
-    │      → Log to Ledger (credential_id, service, domain, status)   │
-    │      → Pipe response body back to agent                          │
-    │    ⚠ The response NEVER contains the credential                 │
-    │    ⚠ The agent gets the API response, not the key               │
-    │                                                                  │
-    └──────────────────────────────────────────────────────────────────┘
+    │      hostname: "api.slack.com",     ← validated domain            │
+    │      port: 443,                     ← always TLS                  │
+    │      path: "/api/chat.postMessage", ← from agent's URL            │
+    │      method: "POST",                                              │
+    │      headers: { ...scrubbed, ...injectedAuth }                    │
+    │    })                                                             │
+    │    ⚠ Connection is HTTPS — credential is encrypted in transit     │
+    │    ⚠ Agent's request body is piped through unchanged              │
+    │                                                                   │
+    │  STEP 8: Response Handling                                        │
+    │    Response comes back from api.slack.com                         │
+    │      → Strip set-cookie headers (prevent session hijack)          │
+    │      → Log to Ledger (credential_id, service, domain, status)     │
+    │      → Pipe response body back to agent                           │
+    │    ⚠ The response NEVER contains the credential                   │
+    │    ⚠ The agent gets the API response, not the key                 │
+    │                                                                   │
+    └───────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -493,7 +493,7 @@ The PBKDF2 derivation (210,000 iterations of SHA-512) takes ~150-250ms depending
 - `aegis vault add` — one derivation for the session
 - `aegis gate` — one derivation at startup, then zero for all requests
 
-The derived key lives in Node.js heap memory for the process lifetime. When the process exits, the memory is released. JavaScript's garbage collector will eventually overwrite the memory, but there's no explicit zeroing of the key material. This is a known limitation (see [Section 13](#13-known-limitations-and-future-work)).
+The derived key lives in Node.js heap memory for the process lifetime. When the process exits, the memory is released. JavaScript's garbage collector will eventually overwrite the memory, but there's no explicit zeroing of the key material. This is a known limitation (see [Section 24](#24-known-limitations-and-future-work)).
 
 **Source:** [src/vault/vault.ts](../src/vault/vault.ts) lines 43-58
 
@@ -546,24 +546,24 @@ The four boundaries in detail:
  ┌─────────────────────────────────────────────────────────────────┐
  │                                                                 │
  │  BOUNDARY 1: Agent ←→ Gate           (localhost HTTP)           │
- │  ═════════════════════════════════════                           │
+ │  ═════════════════════════════════════                          │
  │  The agent is UNTRUSTED. Everything it sends is suspect.        │
  │  Gate strips auth headers, validates domains, controls routing. │
  │                                                                 │
  │  BOUNDARY 2: Gate ←→ Vault           (in-process function call) │
- │  ════════════════════════════════════                            │
+ │  ════════════════════════════════════                           │
  │  Gate asks Vault for a credential. Vault returns decrypted      │
  │  secret. This happens in the same Node.js process — no network. │
  │  The secret exists in heap memory briefly.                      │
  │                                                                 │
  │  BOUNDARY 3: Gate ←→ External API    (HTTPS over internet)      │
- │  ══════════════════════════════════════                          │
+ │  ══════════════════════════════════════                         │
  │  The credential travels over TLS to the real API.               │
  │  Aegis trusts the TLS certificate chain (Node.js default CA).   │
  │  The credential is in the HTTP header, encrypted by TLS.        │
  │                                                                 │
  │  BOUNDARY 4: User ←→ Aegis Config    (filesystem / env vars)    │
- │  ════════════════════════════════════                            │
+ │  ════════════════════════════════════                           │
  │  The master key must get from the user into Aegis somehow.      │
  │  Options: env var (ephemeral) or .env file (persisted).         │
  │  .env files use mode 0600 (owner-only read).                    │
@@ -645,7 +645,7 @@ sequenceDiagram
 
     Gate->>Gate: Domain Guard Check<br/>Is "evil.com" in<br/>["api.slack.com"]?
 
-    rect rgb(255, 200, 200)
+    rect rgba(231, 76, 60, 0.15)
         Gate->>Gate: ✗ BLOCKED<br/>evil.com NOT in allowlist
     end
 
@@ -677,14 +677,14 @@ Every request through Gate is recorded — both allowed and blocked. This is non
 │                                                          │
 │  id:              1                                      │
 │  timestamp:       2026-03-07T12:34:56.000Z               │
-│  credential_id:   "a1b2c3d4-..."      ← which key       │
+│  credential_id:   "a1b2c3d4-..."      ← which key        │
 │  credential_name: "slack-bot"          ← human-readable  │
 │  service:         "slack"              ← service name    │
 │  target_domain:   "api.slack.com"      ← where it went   │
 │  method:          "POST"               ← HTTP method     │
 │  path:            "/api/chat.postMessage" ← API endpoint │
 │  status:          "allowed"                              │
-│  response_code:   200                  ← upstream reply   │
+│  response_code:   200                  ← upstream reply  │
 │  blocked_reason:  NULL                                   │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -1190,7 +1190,7 @@ Aegis supports multiple named vaults, each with its own database and encryption 
 
 ### Security Properties
 
-- **Key isolation:** Each vault has its own PBKDF2 salt and requires its own master key. Compromising one vault's key does not affect others.
+- **Key isolation:** Each vault has its own PBKDF2 salt. The same master key combined with different salts produces a unique derived encryption key per vault — compromising one vault's derived key does not reveal another's. All vaults share the single master key resolved via the standard chain (env var → config → OS keychain → file fallback).
 - **Database isolation:** Each vault is a separate SQLite file. No cross-vault queries.
 - **Registry stores no secrets:** `vaults.json` tracks names, paths, and salts — never master keys.
 
@@ -1413,7 +1413,7 @@ See discussion in [Section 5.2](#52-key-derivation-pbkdf2).
 
 **Why:** The credential is in the HTTP headers of the outbound request. If we used HTTP (plaintext), anyone between Aegis and the API could read the credential. TLS is non-negotiable for transporting secrets.
 
-**Limitation:** This means Aegis can't proxy to HTTP-only APIs. For v0.1, this is an acceptable limitation — any API worth protecting with Aegis should be using HTTPS anyway.
+ **Limitation:** This means Aegis can't proxy to HTTP-only APIs. This is an acceptable limitation — any API worth protecting with Aegis should be using HTTPS anyway.
 
 ---
 
@@ -1428,30 +1428,8 @@ See discussion in [Section 5.2](#52-key-derivation-pbkdf2).
 | **HTTPS only** | Can't proxy to HTTP APIs (rare but possible) | Add optional HTTP support with a scary warning |
 | **No mutual TLS** | Gate trusts any localhost client | Add optional mTLS for Gate-to-agent connection |
 | **Single-level wildcards only** | `*.slack.com` doesn't match `deep.api.slack.com` | Could add `**` glob support if needed |
-| **Query auth type incomplete** | `authType: "query"` is defined but not implemented | Append key to URL query string |
-| **Master key in .env** | Plaintext key on disk readable by any user-level process | ~~OS keychain integration planned~~ → **Resolved in v0.8.4** via cross-platform key storage (macOS Keychain, Windows Credential Manager, Linux libsecret). `.env` and file fallback still available for CI. |
 | **In-memory rate limiter** | Rate limits reset on Gate restart | Redis or SQLite-backed limiter for persistence |
 | **PBKDF2 iteration count** | 210,000 iterations (meets OWASP minimum for SHA-512) | Switching to Argon2id is planned for further hardening |
-
-### Resolved Limitations (since v0.2)
-
-| Previously a Limitation | Resolution | Version |
-|-------------------------|------------|---------|
-| Master key in .env | Cross-platform key storage: macOS Keychain, Windows Credential Manager, Linux Secret Service, with file fallback. `aegis init` stores in OS keychain by default | v0.8.4 |
-| No rate limiting | Sliding window rate limiter (per-credential and per-agent) | v0.2 |
-| No request body inspection | Body inspector with 7 credential patterns, 3 modes | v0.3 |
-| No credential rotation | `aegis vault rotate` command | v0.2 |
-| No agent identity | Agent registry with hash-only tokens and credential grants | v0.2 |
-| No multi-user support | RBAC user system with 3 roles and 16 permissions | v0.5 |
-| No scopes enforcement | Credential scope enforcement: read (GET/HEAD/OPTIONS), write (POST/PUT/PATCH/DELETE), * (all). Enforced in Gate and MCP | v0.7 |
-| No master key splitting | Shamir's Secret Sharing (K-of-N) with seal/unseal | v0.5 |
-| No multi-vault isolation | VaultManager with per-vault databases and encryption keys | v0.5 |
-| No declarative access control | YAML policy engine with per-agent rules | v0.3 |
-| No body size limits (STRIDE D-2) | Configurable max body size with 413 rejection | v0.8.2 |
-| No request timeouts / slowloris defense (STRIDE D-3) | Server-level idle timeout + per-request outbound timeout with 504 | v0.8.2 |
-| No per-agent connection limits (STRIDE D-1) | Configurable concurrent connection cap per agent with 429 | v0.8.2 |
-| No circuit breaker for upstream failures | Circuit breaker: 5 consecutive 5xx → 30s cooldown → 503 with Retry-After | v0.8.2 |
-| No retry logic for transient failures | Automatic retry (max 2, exponential backoff) for idempotent methods on 502/503/504 | v0.8.2 |
 
 ### Future Security Enhancements
 

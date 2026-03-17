@@ -68,7 +68,7 @@ If your credential has only one domain (e.g. `--domains api.slack.com`), Gate us
 
 ### Can teams use it or is it only local?
 
-Both. Solo use works out of the box. Teams get agent auth tokens, credential grants, RBAC users, and YAML policy files (version-controllable, reviewable). A paid team tier with shared vaults is on the roadmap.
+Both. Solo use works out of the box. Teams get agent auth tokens, credential grants, RBAC users, and YAML policy files — all version-controllable and reviewable.
 
 ---
 
@@ -80,4 +80,4 @@ Development speed. This is a solo dev project competing in a fast-moving space. 
 
 ### Is this production-ready?
 
-It's at v1.0 with a published STRIDE threat model (28 threats analysed, 0 critical/high unmitigated), documented security architecture, and hardening work already in place. Solid for individual and small team use. Enterprise hardening (mutual TLS, remote syslog, Redis-backed rate limits) is on the post-v1.0 roadmap.
+It's at v1.0 with a published STRIDE threat model (28 threats analysed, 0 critical/high unmitigated), documented security architecture, and hardening work already in place. Solid for individual and small team use.

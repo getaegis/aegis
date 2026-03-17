@@ -15,31 +15,9 @@ Aegis is a local-first credential isolation proxy for AI agents. It sits between
 
 ## How It Works
 
-```mermaid
-graph LR
-    Agent["🤖 AI Agent<br/><i>No credentials</i>"]
-    Gate["🛡️ Aegis Gate<br/><i>localhost:3100</i>"]
-    Check{"② Domain<br/>allowed?"}
-    API["🌐 Target API<br/><i>slack.com, github.com</i>"]
-    Ledger["📋 Ledger"]
-
-    Agent -->|"① HTTP request<br/>(no auth headers)"| Gate
-    Gate --> Check
-    Check -->|"Yes"| Inject
-    Inject["③ Inject credential"] -->|"Forward over HTTPS"| API
-    API -->|"④ Response"| Gate
-    Gate -->|"⑤ Return response<br/>(credential stripped)"| Agent
-    Check -->|"No"| Block["🚫 Blocked"]
-    Gate -.->|"Log every request"| Ledger
-
-    style Agent fill:#1a1f26,stroke:#C8973E,color:#e8ecef
-    style Gate fill:#1a1f26,stroke:#C8973E,color:#C8973E,stroke-width:2px
-    style Check fill:#1a1f26,stroke:#C8973E,color:#e8ecef
-    style Inject fill:#1a1f26,stroke:#C8973E,color:#e8ecef
-    style API fill:#1a1f26,stroke:#666,color:#e8ecef
-    style Block fill:#1a1f26,stroke:#e74c3c,color:#e74c3c
-    style Ledger fill:#1a1f26,stroke:#C8973E,color:#e8ecef
-```
+<p align="center">
+  <img src="docs/assets/how-it-works.svg" alt="How Aegis works — agent sends request through Gate, credentials injected at the network boundary" width="900" />
+</p>
 
 ## Why?
 
@@ -214,7 +192,7 @@ See [full comparison](docs/COMPARISON.md) for detailed breakdowns against each a
 | [Threat Model](docs/THREAT_MODEL.md) | STRIDE analysis — 28 threats, mitigations, residual risks |
 | [Comparison](docs/COMPARISON.md) | Detailed comparison with .env, Vault, Doppler, Infisical |
 | [FAQ](docs/FAQ.md) | Common questions and objections |
-| [Roadmap](docs/ROADMAP.md) | Feature roadmap from v0.1 to v1.0 |
+| [Roadmap](docs/ROADMAP.md) | Feature roadmap |
 | [Contributing](CONTRIBUTING.md) | Code style, PR process, architecture overview |
 
 ## Install
