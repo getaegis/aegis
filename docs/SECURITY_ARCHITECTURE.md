@@ -3,7 +3,7 @@
 A complete technical reference explaining how Aegis protects credentials, where data flows, what decisions were made, and why. Written so that you can audit every trust boundary yourself.
 
 **Last updated:** 17 March 2026
-**Version:** 1.0.0
+**Version:** 1.0.1
 
 ---
 
