@@ -130,6 +130,7 @@ The MCP server replicates the full Gate security pipeline: domain guard, agent a
 - [VS Code](docs/guides/vscode.md)
 - [Windsurf](docs/guides/windsurf.md)
 - [Cline](docs/guides/cline.md)
+- [OpenClaw](docs/guides/openclaw.md) — personal AI assistant (HTTP proxy + skill)
 
 ## Features
 
@@ -160,6 +161,7 @@ Step-by-step guides with config files and policies included:
 - [**Slack Bot**](examples/slack-bot/) — Protect your Slack bot token with domain-restricted proxy access
 - [**GitHub Integration**](examples/github-integration/) — Secure GitHub PAT with per-agent grants and read-only policies
 - [**Stripe Backend**](examples/stripe-backend/) — Isolate Stripe API keys with body inspection and rate limiting
+- [**OpenClaw Skill**](examples/openclaw-skill/) — Aegis skill for OpenClaw personal AI assistant
 
 ## Security
 
