@@ -23,6 +23,7 @@ Aegis v1.0 is a complete credential isolation layer for AI agents:
 
 ## Future
 
+- **MCP Gateway** — credential proxy for downstream MCP servers. Aegis spawns and manages other MCP servers (Context7, GitHub, Slack, etc.), injecting credentials from the vault at process start. The agent connects only to Aegis — zero plaintext API keys in any config file. Per-agent tool filtering, full audit trail on every proxied tool call.
 - Response scanning and secret redaction
 - Mutual TLS and IP allowlisting for Gate connections
 - Signed policy files (HMAC/GPG verification)

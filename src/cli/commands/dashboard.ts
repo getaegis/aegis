@@ -181,7 +181,7 @@ export function register(program: Command): void {
         const protocol = tlsConfig ? 'https' : 'http';
 
         console.log(`\n  ╔══════════════════════════════════╗`);
-        console.log(`  ║       Aegis Dashboard ${VERSION.padEnd(10)}║`);
+        console.log(`  ║       Aegis Dashboard ${VERSION.padEnd(10)} ║`);
         console.log(`  ╚══════════════════════════════════╝\n`);
 
         if (tlsConfig) {

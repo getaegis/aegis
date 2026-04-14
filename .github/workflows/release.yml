@@ -11,17 +11,63 @@ permissions:
   id-token: write
 
 jobs:
-  release:
-    name: Publish npm & Docker
+  # ================================================================
+  # Job 1: Verify — lint, typecheck, test, build (runs once on Linux)
+  # ================================================================
+  verify:
+    name: Verify
     if: github.repository == 'getaegis/aegis'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Install dashboard dependencies
+        run: cd dashboard && yarn install --immutable
+
+      - name: Lint & Type check
+        run: yarn verify
+
+      - name: Test
+        run: yarn test
+
+      - name: Build
+        run: yarn build
+
+  # ================================================================
+  # Job 2: Publish to npm + MCP Registry
+  # ================================================================
+  publish-npm:
+    name: Publish npm & MCP
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Enable Corepack
         run: corepack enable
@@ -39,19 +85,12 @@ jobs:
       - name: Install dashboard dependencies
         run: cd dashboard && yarn install --immutable
 
-      - name: Lint & Type check
-        run: yarn verify
-
-      - name: Test
-        run: yarn test
-
       - name: Build
         run: yarn build
 
-      # --- npm publish ---
       - name: Publish to npm
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ needs.verify.outputs.version }}"
           if npm view "@getaegis/cli@${VERSION}" version 2>/dev/null; then
             echo "Version ${VERSION} already published to npm, skipping"
           else
@@ -60,10 +99,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # --- MCP Registry publish ---
       - name: Update server.json version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ needs.verify.outputs.version }}"
           jq --arg v "$VERSION" '
             .version = $v |
             .packages[0].version = $v
@@ -81,7 +119,125 @@ jobs:
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish || echo "MCP Registry publish skipped (version may already exist)"
 
-      # --- Docker build & push ---
+  # ================================================================
+  # Job 3: Build platform-specific tarballs with precompiled native addons
+  # ================================================================
+  build-platform:
+    name: Build ${{ matrix.platform }}
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            platform: darwin-arm64
+          - runner: macos-13
+            platform: darwin-x64
+          - runner: ubuntu-latest
+            platform: linux-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+
+      # Linux needs build tools for native addon compilation
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++ make python3
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Install dashboard dependencies
+        run: cd dashboard && yarn install --immutable
+
+      - name: Build
+        run: yarn build
+
+      # Create a clean production bundle with only runtime dependencies
+      - name: Create production bundle
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          PLATFORM="${{ matrix.platform }}"
+          BUNDLE_DIR="/tmp/aegis-${VERSION}-${PLATFORM}"
+
+          mkdir -p "${BUNDLE_DIR}"
+
+          # Copy compiled output
+          cp -r dist "${BUNDLE_DIR}/"
+
+          # Copy yarn config needed for production install
+          cp yarn.lock "${BUNDLE_DIR}/"
+          cp .yarnrc.yml "${BUNDLE_DIR}/"
+
+          # Create production-only package.json (strip devDependencies, scripts, etc.)
+          node -e "
+            const pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf8'));
+            delete pkg.devDependencies;
+            delete pkg.scripts;
+            delete pkg.husky;
+            delete pkg['lint-staged'];
+            require('fs').writeFileSync('${BUNDLE_DIR}/package.json', JSON.stringify(pkg, null, 2));
+          "
+
+          # Install production-only dependencies (compiles native addon for this platform)
+          cd "${BUNDLE_DIR}"
+          yarn install
+
+          # Clean up yarn/build artifacts — only dist/, node_modules/, and package.json ship
+          rm -rf .yarn yarn.lock .yarnrc.yml
+          rm -f .pnp.cjs .pnp.loader.mjs
+
+          # Verify the native addon was compiled
+          ADDON=$(find node_modules -name "*.node" -type f | head -5)
+          if [ -z "$ADDON" ]; then
+            echo "ERROR: No compiled .node addon found in node_modules!"
+            exit 1
+          fi
+          echo "Native addons found:"
+          echo "$ADDON"
+
+          # Create tarball
+          cd /tmp
+          tar czf "aegis-${VERSION}-${PLATFORM}.tar.gz" "aegis-${VERSION}-${PLATFORM}/"
+
+          echo "Bundle created: aegis-${VERSION}-${PLATFORM}.tar.gz"
+          echo "Bundle size: $(du -sh aegis-${VERSION}-${PLATFORM}.tar.gz | cut -f1)"
+          echo "Unpacked size: $(du -sh aegis-${VERSION}-${PLATFORM}/ | cut -f1)"
+
+      - name: Upload platform tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-${{ needs.verify.outputs.version }}-${{ matrix.platform }}
+          path: /tmp/aegis-${{ needs.verify.outputs.version }}-${{ matrix.platform }}.tar.gz
+          retention-days: 5
+
+  # ================================================================
+  # Job 4: Docker build & push (unchanged, runs in parallel)
+  # ================================================================
+  publish-docker:
+    name: Publish Docker
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -95,10 +251,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -106,55 +258,132 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/getaegis/aegis:${{ steps.version.outputs.VERSION }}
+            ghcr.io/getaegis/aegis:${{ needs.verify.outputs.version }}
             ghcr.io/getaegis/aegis:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # --- GitHub Release ---
+  # ================================================================
+  # Job 5: Create GitHub Release + update Homebrew formula
+  # ================================================================
+  finalize:
+    name: Release & Homebrew
+    needs: [verify, publish-npm, build-platform, publish-docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download all platform tarballs
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/platform-builds
+          pattern: aegis-*
+          merge-multiple: true
+
+      - name: List platform tarballs
+        run: ls -lh /tmp/platform-builds/
+
+      # Compute SHA256 checksums for each platform tarball
+      - name: Compute checksums
+        id: checksums
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+
+          for PLATFORM in darwin-arm64 darwin-x64 linux-x64; do
+            FILE="/tmp/platform-builds/aegis-${VERSION}-${PLATFORM}.tar.gz"
+            if [ -f "$FILE" ]; then
+              SHA=$(shasum -a 256 "$FILE" | awk '{print $1}')
+              # Convert platform to env-safe name (darwin-arm64 → darwin_arm64)
+              SAFE_NAME=$(echo "$PLATFORM" | tr '-' '_')
+              echo "sha256_${SAFE_NAME}=${SHA}" >> "$GITHUB_OUTPUT"
+              echo "${PLATFORM}: ${SHA}"
+            else
+              echo "WARNING: ${FILE} not found"
+            fi
+          done
+
+      # Create GitHub Release with platform tarballs attached
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          files: /tmp/platform-builds/aegis-*.tar.gz
 
-      # --- Update Homebrew tap ---
+      # Update Homebrew formula with platform-specific URLs
       - name: Update Homebrew formula
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          TARBALL_URL="https://registry.npmjs.org/@getaegis/cli/-/cli-${VERSION}.tgz"
-          SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | awk '{print $1}')
+          VERSION="${{ needs.verify.outputs.version }}"
+          REPO="https://github.com/getaegis/aegis/releases/download/v${VERSION}"
+
+          SHA_DARWIN_ARM64="${{ steps.checksums.outputs.sha256_darwin_arm64 }}"
+          SHA_DARWIN_X64="${{ steps.checksums.outputs.sha256_darwin_x64 }}"
+          SHA_LINUX_X64="${{ steps.checksums.outputs.sha256_linux_x64 }}"
 
           git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/getaegis/homebrew-aegis.git /tmp/homebrew-aegis
           cd /tmp/homebrew-aegis
 
-          cat > Formula/aegis.rb << EOF
+          cat > Formula/aegis.rb << 'FORMULA_EOF'
           class Aegis < Formula
             desc "Credential isolation for AI agents"
             homepage "https://github.com/getaegis/aegis"
-            url "${TARBALL_URL}"
-            sha256 "${SHA256}"
             license "Apache-2.0"
+            version "VERSION_PLACEHOLDER"
 
             depends_on "node@24"
 
+            on_macos do
+              on_arm do
+                url "REPO_PLACEHOLDER/aegis-VERSION_PLACEHOLDER-darwin-arm64.tar.gz"
+                sha256 "SHA_DARWIN_ARM64_PLACEHOLDER"
+              end
+              on_intel do
+                url "REPO_PLACEHOLDER/aegis-VERSION_PLACEHOLDER-darwin-x64.tar.gz"
+                sha256 "SHA_DARWIN_X64_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "REPO_PLACEHOLDER/aegis-VERSION_PLACEHOLDER-linux-x64.tar.gz"
+                sha256 "SHA_LINUX_X64_PLACEHOLDER"
+              end
+            end
+
             def install
-              system "npm", "install", *std_npm_args
-              bin.install_symlink Dir["\#{libexec}/bin/*"]
+              libexec.install "dist", "node_modules", "package.json"
+
+              # Create wrapper script that uses Homebrew's Node.js
+              node = Formula["node@24"].opt_bin/"node"
+              (bin/"aegis").write <<~EOS
+                #!/bin/bash
+                exec "#{node}" "#{libexec}/dist/cli.js" "$@"
+              EOS
             end
 
             test do
-              assert_match "Aegis", shell_output("\#{bin}/aegis --help")
+              assert_match "Aegis", shell_output("#{bin}/aegis --help")
             end
           end
-          EOF
+          FORMULA_EOF
 
           # Remove leading whitespace from heredoc
           sed -i 's/^          //' Formula/aegis.rb
 
+          # Replace placeholders with actual values
+          sed -i "s|VERSION_PLACEHOLDER|${VERSION}|g" Formula/aegis.rb
+          sed -i "s|REPO_PLACEHOLDER|${REPO}|g" Formula/aegis.rb
+          sed -i "s|SHA_DARWIN_ARM64_PLACEHOLDER|${SHA_DARWIN_ARM64}|g" Formula/aegis.rb
+          sed -i "s|SHA_DARWIN_X64_PLACEHOLDER|${SHA_DARWIN_X64}|g" Formula/aegis.rb
+          sed -i "s|SHA_LINUX_X64_PLACEHOLDER|${SHA_LINUX_X64}|g" Formula/aegis.rb
+
+          echo "=== Generated formula ==="
+          cat Formula/aegis.rb
+          echo "========================="
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/aegis.rb
-          git commit -m "chore: bump aegis to v${VERSION}"
+          git commit -m "chore: bump aegis to v${VERSION} (prebuilt binaries)"
           git push
