@@ -18,7 +18,6 @@ RUN corepack enable && corepack prepare yarn@4.12.0 --activate
 
 # Copy dependency files first (layer cache)
 COPY package.json yarn.lock .yarnrc.yml ./
-COPY .yarn/ .yarn/
 COPY dashboard/package.json dashboard/yarn.lock dashboard/
 
 # Install all dependencies (including devDependencies for build)
@@ -54,7 +53,6 @@ RUN corepack enable && corepack prepare yarn@4.12.0 --activate
 
 WORKDIR /app
 COPY package.json yarn.lock .yarnrc.yml ./
-COPY .yarn/ .yarn/
 
 # Strip devDependencies from package.json and install production-only
 RUN node -e " \
