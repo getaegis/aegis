@@ -94,7 +94,11 @@ jobs:
           if npm view "@getaegis/cli@${VERSION}" version 2>/dev/null; then
             echo "Version ${VERSION} already published to npm, skipping"
           else
-            npm publish --provenance --access public
+            echo "Publishing @getaegis/cli@${VERSION} to npm..."
+            npm publish --provenance --access public || {
+              echo "Provenance publish failed, retrying without provenance..."
+              npm publish --access public
+            }
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -192,8 +196,10 @@ jobs:
           "
 
           # Install production-only dependencies (compiles native addon for this platform)
+          # Disable immutable installs — CI=true auto-enables it but our
+          # package.json has devDeps stripped so the lockfile won't match
           cd "${BUNDLE_DIR}"
-          yarn install
+          YARN_ENABLE_IMMUTABLE_INSTALLS=0 yarn install
 
           # Clean up yarn/build artifacts — only dist/, node_modules/, and package.json ship
           rm -rf .yarn yarn.lock .yarnrc.yml
