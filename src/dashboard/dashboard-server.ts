@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type pino from 'pino';
 import { WebSocketServer } from 'ws';
 import type { AgentRegistry } from '../agent/index.js';
@@ -94,7 +95,7 @@ export class DashboardServer {
     if (options.staticDir) {
       this.staticDir = options.staticDir;
     } else {
-      const thisDir = path.dirname(new URL(import.meta.url).pathname);
+      const thisDir = path.dirname(fileURLToPath(import.meta.url));
       // Production: dist/dashboard/dashboard-server.js → dist/dashboard/public
       const prodPath = path.resolve(thisDir, 'public');
       // Development (tsx): src/dashboard/dashboard-server.ts → ../../dashboard/dist
